@@ -42,6 +42,7 @@ def fetch(d: date):
     except zipfile.BadZipFile:
         return None
     text = zf.read(zf.namelist()[0]).decode("utf-8", "replace")
+    cached.parent.mkdir(parents=True, exist_ok=True)   # gitignored: absent on a fresh runner
     cached.write_text(text)
     time.sleep(1.2)                      # be polite to NSE
     return list(csv.DictReader(io.StringIO(text)))
