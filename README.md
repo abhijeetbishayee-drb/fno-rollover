@@ -31,6 +31,30 @@ independently published rollover sheet for 2026-08-25:
 `next / (near + next)` is *close* and wrong — it misses by up to 1.0pp
 (POWERINDIA 91.35 vs 92.32). It fails quietly, which is worse.
 
+## Why MOM is measured expiry-to-expiry
+
+Deliberate, and checked. Against a published sheet for 2026-08-25, three
+candidate windows were compared on six symbols:
+
+| window | closest on |
+|---|---|
+| expiry -> expiry | **5 of 6** |
+| calendar month-end | 1 of 6 |
+
+Neither reproduces the sheet exactly, so the sheet uses something else again
+(futures rather than spot, a vendor feed, or hand entry). We are not cloning
+it. Expiry-to-expiry is kept because it is both the closer match AND the more
+defensible definition: it aligns the price change with exactly the period whose
+rollover is being measured.
+
+**Corporate actions ruled out as the cause** (2026-09-26). The two largest
+divergences from the sheet, DIXON and SIEMENS, were checked against
+`NewBrdLotQty` across 26 bhavcopy files: DIXON's lot is constant at 50 with no
+price discontinuity, and SIEMENS' 125 -> 175 lot change in Jan 2026 came with
+the price essentially flat (-1.6%), which is NSE's routine lot revision to keep
+contract value in band, not a split. A split moves price inversely to lot.
+So the screen is not reading split-adjusted prices as real moves.
+
 ## Sectors
 
 Reuses `FNO_SECTORS` from
