@@ -63,6 +63,22 @@ Reuses `FNO_SECTORS` from
 fewer than 5 F&O members get no sector baseline: an average over one member is
 that member, and the resulting 0.00 deviation looks like data.
 
+## Parity with the heatmap board
+
+`parity_check.py` asserts, re-runnably, that sector plotting here matches
+[the heatmap board](https://github.com/abhijeetbishayee-drb/nifty-heatmap-web):
+labels, per-name membership, cash-only exclusion, and equal-weighted
+aggregation. It runs in CI before every capture, because the taxonomy is
+fetched at runtime and a change upstream would otherwise land here silently.
+
+Two divergences are STRUCTURAL and declared in the test itself. An
+**undeclared** divergence is what fails:
+
+| | heatmap | here | why |
+|---|---|---|---|
+| cash-only names | plotted (dashed tile) | excluded | no futures, so no OI/rollover/cost exists |
+| small sectors | all 23 plotted | baseline suppressed under 5 F&O members | they display breadth; we score against it, and a deviation from a group of one is 0.00 and reads as data |
+
 ## Files
 
 | | |

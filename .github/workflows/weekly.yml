@@ -21,6 +21,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -q certifi
+      - name: Sector parity with the heatmap board
+        # The taxonomy is FETCHED from nifty-heatmap-core, so a change there
+        # lands here silently. Fail loudly instead -- the 2026-09-06 Android
+        # parity incident happened because nothing tested this.
+        run: python parity_check.py
+
       - name: Capture latest trading day
         run: python update.py
       - name: Commit if the series grew
