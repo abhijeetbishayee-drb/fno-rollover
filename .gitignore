@@ -1,0 +1,5 @@
+# Raw bhavcopy cache — ~7 MB/day, regenerable from NSE on demand.
+data/bhav/
+data/heatmap_core_cache.py
+__pycache__/
+*.pyc

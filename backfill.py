@@ -1,0 +1,146 @@
+"""Backfill F&O rollover metrics from NSE bhavcopy. Read-only, no broker, no orders.
+
+Expiry dates are DERIVED, never assumed: a bhavcopy's nearest STF expiry IS that
+month's expiry, so probing one mid-month file per month yields the real date and
+survives the Thursday->Tuesday convention change inside the backfill window.
+"""
+import csv, io, ssl, sys, time, zipfile, urllib.request
+import certifi
+from datetime import date, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+CACHE = ROOT / "data" / "bhav"
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/125.0 Safari/537.36")
+URL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{d}_F_0000.csv.zip"
+
+
+def fetch(d: date):
+    """Return list-of-dicts for a trading date, or None. Cached on disk."""
+    tag = d.strftime("%Y%m%d")
+    cached = CACHE / f"{tag}.csv"
+    if cached.exists():
+        return list(csv.DictReader(cached.open()))
+    req = urllib.request.Request(URL.format(d=tag), headers={
+        "User-Agent": UA, "Referer": "https://www.nseindia.com/", "Accept": "*/*"})
+    # SSL context is EXPLICIT: this interpreter has no usable default CA bundle,
+    # so a bare urlopen raises CERTIFICATE_VERIFY_FAILED. Found the hard way --
+    # the original `except Exception: return None` swallowed it and reported
+    # "expiry None" twelve times with exit code 0. Never catch broadly here.
+    CTX = ssl.create_default_context(cafile=certifi.where())
+    try:
+        raw = urllib.request.urlopen(req, timeout=30, context=CTX).read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None          # genuinely no file: holiday / non-trading day
+        raise                    # anything else is a real fault -- surface it
+    if len(raw) < 50_000:
+        return None
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        return None
+    text = zf.read(zf.namelist()[0]).decode("utf-8", "replace")
+    cached.write_text(text)
+    time.sleep(1.2)                      # be polite to NSE
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def stf_expiries(rows):
+    return sorted({r["XpryDt"] for r in rows if r["FinInstrmTp"] == "STF"})
+
+
+def expiry_of_month(y, m):
+    """Probe mid-month; the nearest STF expiry in that file IS this month's expiry."""
+    for day in (10, 11, 12, 13, 14, 9, 8, 15, 16, 17):
+        try:
+            d = date(y, m, day)
+        except ValueError:
+            continue
+        if d.weekday() >= 5:
+            continue
+        rows = fetch(d)
+        if not rows:
+            continue
+        exps = stf_expiries(rows)
+        if not exps:
+            continue
+        near = exps[0]
+        if near.startswith(f"{y:04d}-{m:02d}"):
+            return near
+        return None
+    return None
+
+
+def metrics_on(expiry_iso):
+    """Compute per-symbol rollover metrics from the expiry-day bhavcopy."""
+    y, m, dd = map(int, expiry_iso.split("-"))
+    rows = fetch(date(y, m, dd))
+    if not rows:
+        return None
+    per = {}
+    for r in rows:
+        if r["FinInstrmTp"] != "STF":
+            continue
+        per.setdefault(r["TckrSymb"], {})[r["XpryDt"]] = r
+    exps = stf_expiries(rows)
+    if len(exps) < 3:
+        return None
+    near, nxt, far = exps[0], exps[1], exps[2]
+    out = []
+    for sym, d in per.items():
+        if near not in d or nxt not in d:
+            continue
+        oi = lambda e: float(d[e]["OpnIntrst"] or 0) if e in d else 0.0
+        px = lambda e: float(d[e]["ClsPric"] or 0) if e in d else 0.0
+        n_oi, x_oi, f_oi = oi(near), oi(nxt), oi(far)
+        tot = n_oi + x_oi + f_oi
+        if tot <= 0 or px(near) <= 0:
+            continue
+        out.append({
+            "expiry": expiry_iso,
+            "symbol": sym,
+            "spot": float(d[near]["UndrlygPric"] or 0),
+            "near_px": px(near), "next_px": px(nxt),
+            "basis": round(px(near) - float(d[near]["UndrlygPric"] or 0), 4),
+            # VALIDATED against the 2026-08-25 published sheet on 9/9 symbols:
+            "rollover_pct": round(100.0 * (x_oi + f_oi) / tot, 4),
+            "rollover_cost_pct": round(100.0 * (px(nxt) - px(near)) / px(near), 4),
+            "oi_near": n_oi, "oi_next": x_oi, "oi_far": f_oi,
+        })
+    return out
+
+
+def main(n=12):
+    today = date.today()
+    months, y, m = [], today.year, today.month
+    for _ in range(n + 2):
+        months.append((y, m))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    expiries = []
+    for (yy, mm) in months:
+        e = expiry_of_month(yy, mm)
+        print(f"  probe {yy}-{mm:02d} -> expiry {e}", flush=True)
+        if e and e < today.isoformat():
+            expiries.append(e)
+        if len(expiries) >= n:
+            break
+    rows = []
+    for e in expiries:
+        got = metrics_on(e)
+        print(f"  expiry {e}: {len(got) if got else 0} symbols", flush=True)
+        if got:
+            rows.extend(got)
+    outp = ROOT / "data" / "rollover_history.csv"
+    if rows:
+        with outp.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            w.writeheader(); w.writerows(rows)
+    print(f"\nDONE {len(rows)} rows across {len(expiries)} expiries -> {outp}")
+
+
+if __name__ == "__main__":
+    main(int(sys.argv[1]) if len(sys.argv) > 1 else 12)

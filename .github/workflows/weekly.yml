@@ -1,0 +1,36 @@
+name: weekly snapshot
+
+on:
+  schedule:
+    - cron: "0 4 * * 6"        # Saturdays 04:00 UTC = 09:30 IST, after the week closes
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-snapshot
+  cancel-in-progress: false     # a half-written append is worse than a late run
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q certifi
+      - name: Capture latest trading day
+        run: python update.py
+      - name: Commit if the series grew
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/weekly_snapshots.csv; then
+            echo "no change — nothing to commit"
+          else
+            git add data/weekly_snapshots.csv
+            git commit -m "weekly snapshot $(date -u +%F)"
+            git push
+          fi
