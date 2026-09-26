@@ -26,10 +26,19 @@
   .pos{color:var(--pos)} .neg{color:var(--neg)} .dimc{color:var(--dim)}
   a{color:inherit;text-decoration:none} a:hover{color:var(--accent)}
   .note{color:var(--dim);font-size:12px;margin:10px 0 0;max-width:820px}
+  .tabs{margin-top:12px;display:flex;gap:8px}
+  .tabs button{background:#1b1e24;color:var(--dim);border:1px solid var(--line);
+    border-radius:7px;padding:6px 13px;font:inherit;font-size:12px;cursor:pointer}
+  .tabs button.on{color:var(--accent);border-color:var(--accent)}
+  .tabs button:hover{color:var(--fg)}
 </style>
 <header>
   <h1>F&amp;O Rollover Sheet</h1>
   <div class="meta" id="meta">loading…</div>
+  <div class="tabs">
+    <button id="tab-m" class="on" onclick="load('m')">Monthly · per expiry</button>
+    <button id="tab-w" onclick="load('w')">Weekly · week-on-week</button>
+  </div>
 </header>
 <div class="wrap">
   <p class="note">Rollover&nbsp;% = (next&nbsp;+&nbsp;far&nbsp;OI) / (near&nbsp;+&nbsp;next&nbsp;+&nbsp;far&nbsp;OI), from NSE's F&amp;O bhavcopy.
@@ -39,35 +48,55 @@
   <div id="out"></div>
 </div>
 <script>
-const f=(v,d=2)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
+const f=(v,d=2)=>v==null||isNaN(v)?"\u2013":(+v).toFixed(d);
 const sign=v=>v==null||isNaN(v)?"dimc":(v>0?"pos":v<0?"neg":"dimc");
-const sgn=(v,d=2)=>v==null||isNaN(v)?"–":(v>0?"+":"")+(+v).toFixed(d);
+const sgn=(v,d=2)=>v==null||isNaN(v)?"\u2013":(v>0?"+":"")+(+v).toFixed(d);
+const num=v=>(+v).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const big=v=>(+v).toLocaleString("en-IN",{maximumFractionDigits:0});
 const nse=s=>`https://www.nseindia.com/get-quotes/derivatives?symbol=${encodeURIComponent(s)}`;
-fetch("sheet_data.json?t="+Date.now()).then(r=>r.json()).then(d=>{
-  document.getElementById("meta").textContent =
-    `expiry ${d.expiry} · previous ${d.prevExpiry} · ${d.count} names · ${d.sectors.length} sectors · built ${d.generatedAt}`;
-  const H=["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll (prev)","score"];
-  document.getElementById("out").innerHTML = d.sectors.map(s=>`
-    <div class="sec">
-      <div class="sechead" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
-        <b>${s.sector}</b>
-        <span class="stats">n=${s.count} · avg M_O_M <span class="${sign(s.avgMom)}">${sgn(s.avgMom)}</span>
-        · avg rollover ${f(s.avgRoll)}% · avg cost ${f(s.avgCost,2)}</span>
-      </div>
-      <div class="scroll"><table>
-        <thead><tr>${H.map((h,i)=>`<th class="${i===0?'sym':''}">${h}</th>`).join("")}</tr></thead>
-        <tbody>${s.rows.map(r=>`<tr>
-          <td class="sym"><a href="${nse(r.symbol)}" target="_blank" rel="noopener">${r.symbol}</a></td>
-          <td>${(+r.spot).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-          <td class="${sign(r.M_O_M)}">${sgn(r.M_O_M)}</td>
-          <td>${(+r.future_price).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-          <td class="${sign(r.basis)}">${f(r.basis)}</td>
-          <td>${f(r.rollover)}</td><td class="dimc">${f(r.avg_roll)}</td>
-          <td class="${sign(r.DIIF)}">${sgn(r.DIIF)}</td>
-          <td>${f(r.rollover_cost)}</td><td class="dimc">${f(r.avg_cost)}</td>
-          <td class="dimc">${f(r.rollover_prev)}</td>
-          <td class="${sign(r.score)}">${sgn(r.score)}</td></tr>`).join("")}</tbody>
-      </table></div>
-    </div>`).join("");
-}).catch(e=>document.getElementById("meta").textContent="failed to load sheet_data.json: "+e);
+
+const VIEW={
+ m:{file:"sheet_data.json",
+    head:["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll (prev)","score"],
+    meta:d=>`expiry ${d.expiry} \u00b7 previous ${d.prevExpiry} \u00b7 ${d.count} names \u00b7 ${d.sectors.length} sectors \u00b7 built ${d.generatedAt}`,
+    stat:s=>`n=${s.count} \u00b7 avg M_O_M <span class="${sign(s.avgMom)}">${sgn(s.avgMom)}</span> \u00b7 avg rollover ${f(s.avgRoll)}% \u00b7 avg cost ${f(s.avgCost)}`,
+    row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.M_O_M)}">${sgn(r.M_O_M)}</td>
+      <td>${num(r.future_price)}</td><td class="${sign(r.basis)}">${f(r.basis)}</td>
+      <td>${f(r.rollover)}</td><td class="dimc">${f(r.avg_roll)}</td>
+      <td class="${sign(r.DIIF)}">${sgn(r.DIIF)}</td>
+      <td>${f(r.rollover_cost)}</td><td class="dimc">${f(r.avg_cost)}</td>
+      <td class="dimc">${f(r.rollover_prev)}</td><td class="${sign(r.score)}">${sgn(r.score)}</td>`},
+ w:{file:"weekly_data.json",
+    head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","score"],
+    meta:d=>`week ${d.asof} vs ${d.prevWeek} \u00b7 near expiry ${(d.sectors[0]?.rows[0]?.near_expiry)||"\u2013"} \u00b7 ${d.count} names \u00b7 ${d.weeksAvailable} weeks of history \u00b7 built ${d.generatedAt}`,
+    stat:s=>`n=${s.count} \u00b7 avg W_O_W <span class="${sign(s.avgWow)}">${sgn(s.avgWow)}</span> \u00b7 avg \u0394OI <span class="${sign(s.avgOiChg)}">${sgn(s.avgOiChg)}</span>% \u00b7 avg cost ${f(s.avgCost)}`,
+    row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.W_O_W)}">${sgn(r.W_O_W)}</td>
+      <td>${num(r.future_price)}</td><td class="${sign(r.basis)}">${f(r.basis)}</td>
+      <td class="dimc">${big(r.oi_total)}</td><td class="${sign(r.oi_chg_pct)}">${sgn(r.oi_chg_pct)}</td>
+      <td>${f(r.roll_so_far)}</td><td>${f(r.cost)}</td>
+      <td class="${sign(r.cost_chg)}">${sgn(r.cost_chg)}</td>
+      <td class="${sign(r.score)}">${sgn(r.score)}</td>`}
+};
+
+function load(k){
+  const v=VIEW[k];
+  document.getElementById("tab-m").className = k==="m"?"on":"";
+  document.getElementById("tab-w").className = k==="w"?"on":"";
+  document.getElementById("out").innerHTML="";
+  document.getElementById("meta").textContent="loading\u2026";
+  fetch(v.file+"?t="+Date.now()).then(r=>r.json()).then(d=>{
+    document.getElementById("meta").textContent=v.meta(d);
+    document.getElementById("out").innerHTML=d.sectors.map(s=>`
+      <div class="sec">
+        <div class="sechead" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
+          <b>${s.sector}</b><span class="stats">${v.stat(s)}</span>
+        </div>
+        <div class="scroll"><table>
+          <thead><tr>${v.head.map((h,i)=>`<th class="${i===0?'sym':''}">${h}</th>`).join("")}</tr></thead>
+          <tbody>${s.rows.map(r=>`<tr><td class="sym"><a href="${nse(r.symbol)}" target="_blank" rel="noopener">${r.symbol}</a></td>${v.row(r)}</tr>`).join("")}</tbody>
+        </table></div>
+      </div>`).join("");
+  }).catch(e=>document.getElementById("meta").textContent="failed to load "+v.file+": "+e);
+}
+load("m");
 </script>
