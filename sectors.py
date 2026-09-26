@@ -16,7 +16,7 @@ MIN_PEERS exists because a "sector average" over one member IS that member:
 the deviation is exactly 0.00, which LOOKS like data. Groups under the floor
 get NO sector baseline and are reported as such, never silently averaged.
 """
-import importlib.util, ssl, urllib.request
+import ast, ssl, urllib.request
 from pathlib import Path
 
 MIN_PEERS = 5
@@ -40,10 +40,34 @@ def _load():
         if not _CACHE.exists():
             raise RuntimeError(f"taxonomy unavailable and no cache: {e}") from e
         print(f"  [sectors] live fetch failed ({type(e).__name__}); using cache")
-    spec = importlib.util.spec_from_file_location("_nhc", _CACHE)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    return _extract(_CACHE.read_text())
+
+
+def _extract(src):
+    """Pull FNO_SECTORS / CASH_ONLY out WITHOUT executing the module.
+
+    Executing it would drag in the heatmap's own runtime dependencies (it
+    imports `requests` for Yahoo) which we neither need nor should require --
+    found when CI failed on ModuleNotFoundError. Parsing the literals keeps us
+    immune to whatever that module imports next.
+    """
+    want = {"FNO_SECTORS", "CASH_ONLY"}
+    out = {}
+    for node in ast.parse(src).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id in want:
+                v = node.value
+                # CASH_ONLY is frozenset({...}) -- unwrap the call, keep the literal
+                if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) \
+                        and v.func.id in ("frozenset", "set") and v.args:
+                    v = v.args[0]
+                out[t.id] = ast.literal_eval(v)
+    missing = want - set(out)
+    if missing:
+        raise RuntimeError(f"taxonomy missing {missing} -- upstream shape changed")
+    return type("T", (), out)
 
 
 def _norm(t):

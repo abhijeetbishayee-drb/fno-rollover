@@ -21,13 +21,12 @@ DECLARED = {
 }
 
 def heatmap_core():
-    ours.sector_map()                      # forces cache refresh
-    import importlib.util
+    """Same parse-don't-execute path sectors.py uses -- the heatmap module
+    imports `requests`, which we must not require just to read two dicts."""
+    ours.sector_map()                      # refreshes the cache
     from pathlib import Path
-    p = Path(__file__).resolve().parent / "data" / "heatmap_core_cache.py"
-    spec = importlib.util.spec_from_file_location("_hm", p)
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-    return m
+    return ours._extract(
+        (Path(__file__).resolve().parent / "data" / "heatmap_core_cache.py").read_text())
 
 def main():
     hm = heatmap_core()
