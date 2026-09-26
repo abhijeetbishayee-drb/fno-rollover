@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>F&O Rollover Sheet</title>
+<style>
+  :root{--bg:#0e0f12;--card:#16181d;--line:#24272e;--fg:#e6e8ec;--dim:#8a8f9a;--accent:#e8b84a;
+        --pos:#3ecf8e;--neg:#ef5f6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 20px 10px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:17px;color:var(--accent);letter-spacing:.3px}
+  .meta{color:var(--dim);font-size:12px;margin-top:4px}
+  .wrap{padding:14px 20px 60px}
+  .sec{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:14px 0;overflow:hidden}
+  .sechead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+           padding:10px 14px;background:#1b1e24;border-bottom:1px solid var(--line);cursor:pointer}
+  .sechead b{color:var(--accent);font-size:13px}
+  .stats{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;min-width:940px;font-variant-numeric:tabular-nums}
+  th,td{padding:6px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid #1e2128}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
+     position:sticky;top:0;background:#1b1e24}
+  td.sym,th.sym{text-align:left;font-weight:600}
+  tbody tr:hover{background:#1c1f26}
+  .pos{color:var(--pos)} .neg{color:var(--neg)} .dimc{color:var(--dim)}
+  a{color:inherit;text-decoration:none} a:hover{color:var(--accent)}
+  .note{color:var(--dim);font-size:12px;margin:10px 0 0;max-width:820px}
+</style>
+<header>
+  <h1>F&amp;O Rollover Sheet</h1>
+  <div class="meta" id="meta">loading…</div>
+</header>
+<div class="wrap">
+  <p class="note">Rollover&nbsp;% = (next&nbsp;+&nbsp;far&nbsp;OI) / (near&nbsp;+&nbsp;next&nbsp;+&nbsp;far&nbsp;OI), from NSE's F&amp;O bhavcopy.
+  <b>DIIF</b> is rollover against the stock's own trailing average. Sector rows are equal-weighted,
+  matching the heatmap board. <b>TGT</b> and <b>RANK</b> from the broadcast sheet are deliberately absent —
+  a price target is discretionary, and RANK's rule was not recoverable, so showing a guess would be fiction.</p>
+  <div id="out"></div>
+</div>
+<script>
+const f=(v,d=2)=>v==null||isNaN(v)?"–":(+v).toFixed(d);
+const sign=v=>v==null||isNaN(v)?"dimc":(v>0?"pos":v<0?"neg":"dimc");
+const sgn=(v,d=2)=>v==null||isNaN(v)?"–":(v>0?"+":"")+(+v).toFixed(d);
+const nse=s=>`https://www.nseindia.com/get-quotes/derivatives?symbol=${encodeURIComponent(s)}`;
+fetch("sheet_data.json?t="+Date.now()).then(r=>r.json()).then(d=>{
+  document.getElementById("meta").textContent =
+    `expiry ${d.expiry} · previous ${d.prevExpiry} · ${d.count} names · ${d.sectors.length} sectors · built ${d.generatedAt}`;
+  const H=["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll (prev)","score"];
+  document.getElementById("out").innerHTML = d.sectors.map(s=>`
+    <div class="sec">
+      <div class="sechead" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
+        <b>${s.sector}</b>
+        <span class="stats">n=${s.count} · avg M_O_M <span class="${sign(s.avgMom)}">${sgn(s.avgMom)}</span>
+        · avg rollover ${f(s.avgRoll)}% · avg cost ${f(s.avgCost,2)}</span>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr>${H.map((h,i)=>`<th class="${i===0?'sym':''}">${h}</th>`).join("")}</tr></thead>
+        <tbody>${s.rows.map(r=>`<tr>
+          <td class="sym"><a href="${nse(r.symbol)}" target="_blank" rel="noopener">${r.symbol}</a></td>
+          <td>${(+r.spot).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+          <td class="${sign(r.M_O_M)}">${sgn(r.M_O_M)}</td>
+          <td>${(+r.future_price).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+          <td class="${sign(r.basis)}">${f(r.basis)}</td>
+          <td>${f(r.rollover)}</td><td class="dimc">${f(r.avg_roll)}</td>
+          <td class="${sign(r.DIIF)}">${sgn(r.DIIF)}</td>
+          <td>${f(r.rollover_cost)}</td><td class="dimc">${f(r.avg_cost)}</td>
+          <td class="dimc">${f(r.rollover_prev)}</td>
+          <td class="${sign(r.score)}">${sgn(r.score)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div>`).join("");
+}).catch(e=>document.getElementById("meta").textContent="failed to load sheet_data.json: "+e);
+</script>

@@ -25,7 +25,14 @@ SRC = ("https://raw.githubusercontent.com/abhijeetbishayee-drb/"
 _CACHE = Path(__file__).resolve().parent / "data" / "heatmap_core_cache.py"
 
 
+_MEMO = {}
+
+
 def _load():
+    # memoised: viable_sectors() calls sector_map() per sector per expiry, and
+    # without this a 10-window forward test made ~10 network round-trips.
+    if "t" in _MEMO:
+        return _MEMO["t"]
     try:
         import certifi
         ctx = ssl.create_default_context(cafile=certifi.where())
@@ -40,7 +47,8 @@ def _load():
         if not _CACHE.exists():
             raise RuntimeError(f"taxonomy unavailable and no cache: {e}") from e
         print(f"  [sectors] live fetch failed ({type(e).__name__}); using cache")
-    return _extract(_CACHE.read_text())
+    _MEMO["t"] = _extract(_CACHE.read_text())
+    return _MEMO["t"]
 
 
 def _extract(src):

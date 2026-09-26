@@ -29,14 +29,17 @@ jobs:
 
       - name: Capture latest trading day
         run: python update.py
+      - name: Rebuild the hosted sheet
+        run: python scripts/build_sheet_json.py
+
       - name: Commit if the series grew
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- data/weekly_snapshots.csv; then
+          git add -A data/weekly_snapshots.csv sheet_data.json
+          if git diff --cached --quiet; then
             echo "no change — nothing to commit"
           else
-            git add data/weekly_snapshots.csv
             git commit -m "weekly snapshot $(date -u +%F)"
             git push
           fi
