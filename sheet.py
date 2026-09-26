@@ -15,6 +15,7 @@ def build(expiry=None, out_csv=True):
     by, exps = load()
     idx = exps.index(expiry) if expiry else len(exps) - 1
     cur, prev = exps[idx], exps[idx - 1]
+    prev2 = exps[idx - 2] if idx >= 2 else None
     sm = sector_map()
     rec = score_expiry(by, exps, idx, sm)
     rows = []
@@ -29,6 +30,10 @@ def build(expiry=None, out_csv=True):
             "DIIF": v["roll_vs_own"],
             "rollover_prev": float(d[prev]["rollover_pct"]),
             "cost_prev": float(d[prev]["rollover_cost_pct"]),
+            "rollover_prev2": (float(d[prev2]["rollover_pct"])
+                               if prev2 and prev2 in d else None),
+            "cost_prev2": (float(d[prev2]["rollover_cost_pct"])
+                           if prev2 and prev2 in d else None),
             "score": v["score"],
         })
     rows.sort(key=lambda r: (r["sector"], r["symbol"]))
@@ -37,7 +42,7 @@ def build(expiry=None, out_csv=True):
         with open(p, "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
         print(f"full sheet -> {p}  ({len(rows)} rows, expiry {cur}, prev {prev})\n")
-    return rows, cur, prev
+    return rows, cur, prev, prev2
 
 
 def show(rows, sectors=None, limit=None):
@@ -65,5 +70,5 @@ def show(rows, sectors=None, limit=None):
 
 
 if __name__ == "__main__":
-    rows, cur, prev = build("2026-08-25")
+    rows, cur, prev, _ = build("2026-08-25")
     show(rows, sectors=["Banks", "Capital Goods", "Metals & Mining"])

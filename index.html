@@ -32,6 +32,9 @@
     border-radius:7px;padding:6px 13px;font:inherit;font-size:12px;cursor:pointer}
   .tabs button.on{color:var(--accent);border-color:var(--accent)}
   .tabs button:hover{color:var(--fg)}
+  .tabs select{background:#1b1e24;color:var(--fg);border:1px solid var(--line);
+    border-radius:7px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .tabs select:hover{border-color:var(--accent)}
 </style>
 <header>
   <h1>F&amp;O Rollover Sheet</h1>
@@ -39,6 +42,7 @@
   <div class="tabs">
     <button id="tab-m" class="on" onclick="load('m')">Monthly · per expiry</button>
     <button id="tab-w" onclick="load('w')">Weekly · week-on-week</button>
+    <select id="pick" onchange="load('m')" title="view any past expiry"></select>
   </div>
 </header>
 <div class="wrap">
@@ -57,8 +61,9 @@ const big=v=>(+v).toLocaleString("en-IN",{maximumFractionDigits:0});
 const nse=s=>`https://www.nseindia.com/get-quotes/derivatives?symbol=${encodeURIComponent(s)}`;
 
 const VIEW={
- m:{file:"sheet_data.json",
-    head:["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll (prev)","score"],
+ m:{file:()=>{const p=document.getElementById("pick");
+       return (p&&p.value)||"sheet_data.json";},
+    head:["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll -1","roll -2","score"],
     meta:d=>`expiry ${d.expiry} \u00b7 previous ${d.prevExpiry} \u00b7 ${d.count} names \u00b7 ${d.sectors.length} sectors \u00b7 built ${d.generatedAt}`,
     stat:s=>`n=${s.count} \u00b7 avg M_O_M <span class="${sign(s.avgMom)}">${sgn(s.avgMom)}</span> \u00b7 avg rollover ${f(s.avgRoll)}% \u00b7 avg cost ${f(s.avgCost)}`,
     row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.M_O_M)}">${sgn(r.M_O_M)}</td>
@@ -66,8 +71,9 @@ const VIEW={
       <td>${f(r.rollover)}</td><td class="dimc">${f(r.avg_roll)}</td>
       <td class="${sign(r.DIIF)}">${sgn(r.DIIF)}</td>
       <td>${f(r.rollover_cost)}</td><td class="dimc">${f(r.avg_cost)}</td>
-      <td class="dimc">${f(r.rollover_prev)}</td><td class="${sign(r.score)}">${sgn(r.score)}</td>`},
- w:{file:"weekly_data.json",
+      <td class="dimc">${f(r.rollover_prev)}</td><td class="dimc">${f(r.rollover_prev2)}</td>
+      <td class="${sign(r.score)}">${sgn(r.score)}</td>`},
+ w:{file:()=>"weekly_data.json",
     head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","score"],
     meta:d=>`week ${d.asof} vs ${d.prevWeek} \u00b7 near expiry ${(d.sectors[0]?.rows[0]?.near_expiry)||"\u2013"} \u00b7 ${d.count} names \u00b7 ${d.weeksAvailable} weeks of history \u00b7 built ${d.generatedAt}`,
     stat:s=>`n=${s.count} \u00b7 avg W_O_W <span class="${sign(s.avgWow)}">${sgn(s.avgWow)}</span> \u00b7 avg \u0394OI <span class="${sign(s.avgOiChg)}">${sgn(s.avgOiChg)}</span>% \u00b7 avg cost ${f(s.avgCost)}`,
@@ -91,7 +97,8 @@ function load(k){
   document.getElementById("tab-w").className = k==="w"?"on":"";
   document.getElementById("out").innerHTML="";
   document.getElementById("meta").textContent="loading\u2026";
-  fetch(v.file+"?t="+Date.now()).then(r=>r.json()).then(d=>{
+  document.getElementById("pick").style.display = k==="m"?"":"none";
+  fetch(v.file()+"?t="+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta").textContent=v.meta(d);
     const ordered=d.sectors;   // canonical order baked in at build time
     document.getElementById("out").innerHTML=ordered.map(s=>`
@@ -109,12 +116,15 @@ function load(k){
       if(COLLAPSED.has(h.dataset.sec)) h.nextElementSibling.style.display="none";
     });
     window.scrollTo({top:keepY,behavior:"instant"});
-  }).catch(e=>document.getElementById("meta").textContent="failed to load "+v.file+": "+e);
+  }).catch(e=>document.getElementById("meta").textContent="failed to load "+v.file()+": "+e);
 }
 function toggleSec(h){
   const box=h.nextElementSibling, hide=box.style.display!=="none";
   box.style.display=hide?"none":"";
   hide?COLLAPSED.add(h.dataset.sec):COLLAPSED.delete(h.dataset.sec);
 }
-load("m");
+fetch("expiries.json?t="+Date.now()).then(r=>r.json()).then(d=>{
+  document.getElementById("pick").innerHTML =
+    d.expiries.map((e,i)=>`<option value="${e.file}">${e.expiry}${i?"":"  (latest)"}</option>`).join("");
+}).catch(()=>{}).finally(()=>load("m"));
 </script>
