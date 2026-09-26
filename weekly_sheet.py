@@ -65,7 +65,15 @@ def emit():
         "rows": [{kk: (round(vv, 4) if isinstance(vv, float) else vv)
                   for kk, vv in x.items() if kk != "sector"} for x in v],
     } for k, v in sorted(g.items())]
-    sectors.sort(key=lambda s: -s["avgOiChg"])
+    # adopt the monthly sheet's canonical order so the two views scroll
+    # together; fall back to own ranking only if it has not been built yet
+    ref = ROOT / "sheet_data.json"
+    if ref.exists():
+        order = {x["sector"]: x.get("order", 999)
+                 for x in json.loads(ref.read_text())["sectors"]}
+        sectors.sort(key=lambda s: order.get(s["sector"], 999))
+    else:
+        sectors.sort(key=lambda s: -s["avgOiChg"])
     doc = {"asof": cur, "prevWeek": prev, "weeksAvailable": len(weeks),
            "count": len(rows), "sectors": sectors,
            "generatedAt": datetime.now(timezone.utc).replace(microsecond=0)

@@ -93,7 +93,7 @@ function load(k){
   document.getElementById("meta").textContent="loading\u2026";
   fetch(v.file+"?t="+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta").textContent=v.meta(d);
-    const ordered=[...d.sectors].sort((a,b)=>a.sector.localeCompare(b.sector));
+    const ordered=d.sectors;   // canonical order baked in at build time
     document.getElementById("out").innerHTML=ordered.map(s=>`
       <div class="sec">
         <div class="sechead" data-sec="${s.sector}" onclick="toggleSec(this)">
