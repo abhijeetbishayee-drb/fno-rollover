@@ -11,13 +11,27 @@ They must be DECLARED here, so an undeclared one is what fails.
 import csv, glob, json, statistics as st, sys
 from pathlib import Path
 import sectors as ours
+import nse_industry
 
 # Module-level so test_parity_negative.py can point check [5] at a mutated copy.
 SHEET = Path(__file__).resolve().parent / "sheet_data.json"
 
+# Our sectors that intentionally cut across NSE's industries. The VALUE is the
+# full set of NSE industries a sector is allowed to contain -- not a blanket
+# exemption. A new industry appearing inside a declared sector still FAILS,
+# which is what keeps the declaration from becoming a licence.
+DECLARED_NSE = {
+    "Defence":        {"Capital Goods", "Chemicals"},
+    "New Age Stocks": {"Consumer Services", "Financial Services"},
+}
+
 DECLARED = {
     "cash_only": "heatmap PLOTS cash-only names (dashed tile); we exclude them — "
                  "they have no futures, so no OI/rollover/cost exists to screen",
+    "fin_split": "NSE has ONE 'Financial Services' industry; the board splits it three "
+                 "ways into Banks / NBFCs / Financial Services. A per-sector purity test "
+                 "cannot see this (each of the three is internally pure), so it is recorded "
+                 "here rather than left to look like agreement",
     "min_peers": f"heatmap plots ALL 23 sectors; we suppress the sector BASELINE "
                  f"below {ours.MIN_PEERS} F&O members — a deviation from a group "
                  f"of one is 0.00 and reads as data. Different use of the same "
@@ -38,7 +52,7 @@ def main():
     hm_sec = {norm(t): s for s, v in hm.FNO_SECTORS.items() for t in v}
     cash = {norm(t) for t in (getattr(hm, "CASH_ONLY", []) or [])}
     mine = ours.sector_map()
-    fails = []
+    fails, skipped = [], []
 
     # 1. sector LABELS identical
     if set(hm.FNO_SECTORS) != set(v for v in mine.values()) | {
@@ -100,11 +114,55 @@ def main():
             fails.append(f"sector aggregate is not an equal-weighted mean "
                          f"(worst deviation {worst:.4f})")
 
+    # 6. THE ONLY INDEPENDENT CHECK. [1]-[4] compare our map against the board it
+    # was derived from, so they pass by construction. NSE publishes its own
+    # industry classification with no causal link to the heatmap, so a
+    # disagreement here is real information rather than a tautology.
+    nse = nse_industry.industry_map()
+    if not nse:
+        skipped.append("[6] NSE industry cross-check — source unreachable and no cache")
+        print("[6] NSE industry      : SKIP — NSE unreachable and no cache")
+    else:
+        gaps = sorted(s for s in mine if s not in nse)
+        if gaps:
+            fails.append(f"F&O names absent from NSE's own list (renamed/delisted?): {gaps}")
+        spread = {}
+        for sym, sec in mine.items():
+            if sym in nse:
+                spread.setdefault(sec, {}).setdefault(nse[sym], []).append(sym)
+        offenders = []
+        for sec, inds in sorted(spread.items()):
+            allowed = DECLARED_NSE.get(sec)
+            if allowed is not None:
+                extra = set(inds) - allowed
+                if extra:
+                    offenders += [f"{s} ({sec} declared, but NSE says {i})"
+                                  for i in sorted(extra) for s in sorted(inds[i])]
+                continue
+            if len(inds) > 1:
+                main = max(inds, key=lambda i: len(inds[i]))
+                offenders += [f"{s} ({sec} is otherwise all {main}, but NSE says {i})"
+                              for i in sorted(inds) if i != main for s in sorted(inds[i])]
+        if offenders:
+            fails.append("sector contradicts NSE's own industry: " + "; ".join(offenders))
+        pure = sum(1 for sec, inds in spread.items()
+                   if len(inds) == 1 and sec not in DECLARED_NSE)
+        print(f"[6] NSE industry      : {len(mine) - len(gaps)}/{len(mine)} names matched, "
+              f"{pure}/{len(spread)} sectors pure, {len(DECLARED_NSE)} declared cross-cuts, "
+              f"{len(offenders)} contradictions  "
+              f"{'OK' if not (gaps or offenders) else 'FAIL'}")
+
     print("\nDECLARED structural divergences (intentional):")
     for k, v in DECLARED.items():
         print(f"  * {k}: {v}")
 
-    print("\n" + ("PARITY OK" if not fails else "PARITY FAILED:\n  " + "\n  ".join(fails)))
+    if skipped:
+        print("\nNOT RUN (absence of a result is not a pass):")
+        for k in skipped:
+            print(f"  ? {k}")
+    tail = f" ({len(skipped)} check not run)" if skipped else ""
+    print("\n" + (f"PARITY OK{tail}" if not fails
+                  else "PARITY FAILED:\n  " + "\n  ".join(fails)))
     return 1 if fails else 0
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ leaves the tree dirty would make the next check's result meaningless.
 import contextlib, io, json, sys, tempfile
 from pathlib import Path
 
+import nse_industry
 import sectors as ours
 import parity_check as pc
 
@@ -54,6 +55,40 @@ def patched_sheet(mutate):
         pc.SHEET = real
 
 
+@contextlib.contextmanager
+def patched_nse(mutate):
+    """Corrupt the NSE side, not ours.
+
+    Check [6] cannot be reached by mutating our own map: any membership change
+    [6] would catch, [2] catches first, because both read `mine`. [6] only
+    fires when the BOARD disagrees with NSE -- so that is what has to be
+    simulated here."""
+    real = nse_industry.industry_map
+    m = dict(real())
+    mutate(m)
+    nse_industry.industry_map = lambda *a, **k: m
+    try:
+        yield
+    finally:
+        nse_industry.industry_map = real
+
+
+def nse_reclassifies(m):
+    m["SUNPHARMA"] = "Metals & Mining"         # contradicts our Healthcare
+
+
+def nse_drops_a_name(m):
+    del m["RELIANCE"]                          # coverage gap
+
+
+def declared_gains_industry(m):
+    m["BEL"] = "Information Technology"        # Defence is declared, but not for this
+
+
+def nse_unreachable(m):
+    m.clear()                                  # must SKIP, and must not read as OK
+
+
 def invent_label(m):
     m["RELIANCE"] = "Bitcoin Mining"
 
@@ -91,7 +126,16 @@ CASES = [
     ("[4] cash-only name leaked",  patched_map, leak_cash_only, "cash-only leaked"),
     ("[5] spot-weighted aggregate", patched_sheet, spot_weight,
      "not an equal-weighted mean"),
+    ("[6] NSE contradicts sector", patched_nse, nse_reclassifies,
+     "contradicts NSE's own industry"),
+    ("[6] name absent from NSE",   patched_nse, nse_drops_a_name,
+     "absent from NSE's own list"),
+    ("[6] declared cross-cut drifts", patched_nse, declared_gains_industry,
+     "declared, but NSE says"),
 ]
+
+# A check that cannot run must not read as a check that passed.
+SKIP_CASE = ("[6] NSE source unavailable", patched_nse, nse_unreachable)
 
 
 def main():
@@ -112,6 +156,16 @@ def main():
         print(f"{name:<30}{'yes' if caught else 'NO':>9}{'yes' if restored else 'NO':>10}   {note}")
         if not (caught and restored):
             bad.append(name)
+
+    name, ctx, mutate = SKIP_CASE
+    with ctx(mutate):
+        rc, out = run()
+    ok = rc == 0 and "SKIP" in out and "check not run" in out and "NOT RUN" in out
+    rc2, _ = run()
+    print(f"{name:<30}{'yes' if ok else 'NO':>9}{'yes' if rc2 == 0 else 'NO':>10}"
+          f"   must SKIP visibly, never silently pass")
+    if not (ok and rc2 == 0):
+        bad.append(name)
 
     print()
     if bad:
