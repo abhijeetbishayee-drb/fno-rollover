@@ -35,6 +35,20 @@
   .tabs select{background:#1b1e24;color:var(--fg);border:1px solid var(--line);
     border-radius:7px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
   .tabs select:hover{border-color:var(--accent)}
+  td.sym span{cursor:pointer;border-bottom:1px dotted #4a4f59}
+  td.sym span:hover{color:var(--accent);border-bottom-color:var(--accent)}
+  tr.open td{background:#1c1f26}
+  td.det{padding:0;background:#111317;text-align:left}
+  .pcr{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start;padding:12px 16px;
+       border-left:2px solid var(--accent)}
+  .pcr .k{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+  .pcr .big{font-size:22px;line-height:1.1;margin-top:2px}
+  .pcr .mid{font-size:15px;line-height:1.1;margin-top:2px}
+  .pcr .from{color:var(--dim);font-size:11px;margin-top:3px}
+  .spark{flex:1;min-width:210px}
+  .pcrfoot{color:var(--dim);font-size:11px;padding:0 16px 12px 18px}
+  .pcrfoot a{color:var(--accent);border-bottom:1px dotted var(--accent)}
+  .nodata{color:var(--dim);padding:12px 16px;font-size:12px;border-left:2px solid #333}
 </style>
 <header>
   <h1>F&amp;O Rollover Sheet</h1>
@@ -49,7 +63,11 @@
   <p class="note">Rollover&nbsp;% = (next&nbsp;+&nbsp;far&nbsp;OI) / (near&nbsp;+&nbsp;next&nbsp;+&nbsp;far&nbsp;OI), from NSE's F&amp;O bhavcopy.
   <b>DIIF</b> is rollover against the stock's own trailing average. Sector rows are equal-weighted,
   matching the heatmap board. <b>TGT</b> and <b>RANK</b> from the broadcast sheet are deliberately absent —
-  a price target is discretionary, and RANK's rule was not recoverable, so showing a guess would be fiction.</p>
+  a price target is discretionary, and RANK's rule was not recoverable, so showing a guess would be fiction.
+  <br><b>Click any symbol</b> for its Put-Call Ratio — total PE open interest over total CE open interest
+  across all of that stock's live option contracts. Stock options have no weekly expiry, so unlike the
+  Nifty PCR tracker, <b>WOW</b> and <b>MOM</b> here are the same measure one week and one month apart,
+  not two different expiries priced on the same day.</p>
   <div id="out"></div>
 </div>
 <script>
@@ -85,13 +103,86 @@ const VIEW={
       <td class="${sign(r.score)}">${sgn(r.score)}</td>`}
 };
 
+// ---- per-stock PCR, opened inline under the row it belongs to ----------------
+// PCR here is total PE open interest / total CE open interest across ALL of the
+// symbol's live option contracts. WOW and MOM are TIME comparisons, one week and
+// one month apart -- NOT the weekly-expiry vs monthly-expiry pair the Nifty PCR
+// tracker shows, because stock options have no weekly expiry at all. See pcr.py.
+const EXPANDED=new Set();
+let ROWS={}, HISTD=[], PCRX=null;
+
+function rowHTML(r,v){
+  return `<tr data-sym="${r.symbol}"><td class="sym"><span onclick="toggleRow(this)"
+    >${r.symbol}</span></td>${v.row(r)}</tr>`;
+}
+function toggleRow(el){
+  const tr=el.closest("tr"), sym=tr.dataset.sym;
+  if(EXPANDED.has(sym)){EXPANDED.delete(sym);closeRow(tr);}
+  else{EXPANDED.add(sym);openRow(tr);}
+}
+function closeRow(tr){
+  tr.classList.remove("open");
+  const n=tr.nextElementSibling;
+  if(n&&n.classList.contains("det-row")) n.remove();
+}
+function openRow(tr){
+  const n=tr.nextElementSibling;
+  if(n&&n.classList.contains("det-row")) return;
+  tr.classList.add("open");
+  const det=document.createElement("tr");
+  det.className="det-row";
+  det.innerHTML=`<td class="det" colspan="${tr.children.length}">${panel(tr.dataset.sym)}</td>`;
+  tr.after(det);
+}
+function pcrOf(sym){
+  const r=ROWS[sym];
+  if(r&&r.pcr) return r.pcr;
+  return (PCRX&&PCRX[sym])||null;   // weekly rows carry no PCR of their own
+}
+const last_i=pts=>pts[pts.length-1][0];
+function spark(vals){
+  const pts=vals.map((v,i)=>[i,v]).filter(p=>p[1]!=null);
+  if(pts.length<2) return "";
+  const ys=pts.map(p=>p[1]), lo=Math.min(...ys), hi=Math.max(...ys), rng=(hi-lo)||1;
+  const X=i=>vals.length<2?0:i/(vals.length-1)*200;
+  const Y=v=>30-(v-lo)/rng*26;
+  const d=pts.map(p=>`${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const last=pts[pts.length-1];
+  const a=HISTD[pts[0][0]], b=HISTD[last_i(pts)];
+  const span = (a&&b) ? `${a} \u2192 ${b}` : `${pts.length} expiries`;
+  return `<svg viewBox="0 0 204 34" preserveAspectRatio="none" style="width:100%;height:34px">
+    <polyline points="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5"
+      vector-effect="non-scaling-stroke"/>
+    <circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="var(--accent)"/>
+  </svg><div class="from">${span} \u00b7 range ${f(lo)}\u2013${f(hi)}</div>`;
+}
+function panel(sym){
+  const p=pcrOf(sym);
+  if(!p) return `<div class="nodata">No option data for ${sym} at this expiry \u00b7
+    <a href="${nse(sym)}" target="_blank" rel="noopener">open on NSE</a></div>`;
+  const cell=(k,v,cls,from)=>`<div><div class="k">${k}</div>
+    <div class="${cls}">${v}</div>${from?`<div class="from">${from}</div>`:""}</div>`;
+  const wow = p.wow==null?"" : cell("WOW",sgn(p.wow),"mid "+sign(p.wow),
+              `${f(p.pcrWk)} \u2192 ${f(p.pcr)}`);
+  const mom = p.mom==null?"" : cell("MOM",sgn(p.mom),"mid "+sign(p.mom),
+              `${f(p.pcrPrev)} \u2192 ${f(p.pcr)}`);
+  const sp = p.hist ? `<div class="spark"><div class="k">PCR by expiry</div>${spark(p.hist)}</div>` : "";
+  const bits=[`CE OI ${big(p.ce)}`,`PE OI ${big(p.pe)}`];
+  if(p.maxCE!=null) bits.push(`peak CE ${big(p.maxCE)}`);
+  if(p.maxPE!=null) bits.push(`peak PE ${big(p.maxPE)}`);
+  if(p.expiry) bits.push(`contract ${p.expiry}`);
+  return `<div class="pcr">${cell("PCR",f(p.pcr),"big")}${wow}${mom}${sp}</div>
+    <div class="pcrfoot">${bits.join(" \u00b7 ")} \u00b7
+      <a href="${nse(sym)}" target="_blank" rel="noopener">open on NSE</a></div>`;
+}
+
 const COLLAPSED=new Set();          // survives view switches
 function load(k){
   const v=VIEW[k];
   // Both views must present sectors in the SAME order, otherwise restoring the
   // scroll position lands you on a different sector -- the two would not track.
-  // Alphabetical is chosen over each view's own ranking because it is also
-  // stable across data refreshes, so your position survives a rebuild too.
+  // That order is average rollover cost, fixed at BUILD time in
+  // build_sheet_json.py and adopted verbatim by the weekly sheet.
   const keepY = window.scrollY;
   document.getElementById("tab-m").className = k==="m"?"on":"";
   document.getElementById("tab-w").className = k==="w"?"on":"";
@@ -100,6 +191,8 @@ function load(k){
   document.getElementById("pick").style.display = k==="m"?"":"none";
   fetch(v.file()+"?t="+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta").textContent=v.meta(d);
+    ROWS={}; HISTD=d.pcrHist||[];
+    d.sectors.forEach(sec=>sec.rows.forEach(r=>{ROWS[r.symbol]=r;}));
     const ordered=d.sectors;   // canonical order baked in at build time
     document.getElementById("out").innerHTML=ordered.map(s=>`
       <div class="sec">
@@ -108,14 +201,26 @@ function load(k){
         </div>
         <div class="scroll"><table>
           <thead><tr>${v.head.map((h,i)=>`<th class="${i===0?'sym':''}">${h}</th>`).join("")}</tr></thead>
-          <tbody>${s.rows.map(r=>`<tr><td class="sym"><a href="${nse(r.symbol)}" target="_blank" rel="noopener">${r.symbol}</a></td>${v.row(r)}</tr>`).join("")}</tbody>
+          <tbody>${s.rows.map(r=>rowHTML(r,v)).join("")}</tbody>
         </table></div>
       </div>`).join("");
     // reapply collapse state, then put the reader back where they were
     document.querySelectorAll(".sechead").forEach(h=>{
       if(COLLAPSED.has(h.dataset.sec)) h.nextElementSibling.style.display="none";
     });
+    if(EXPANDED.size) document.querySelectorAll("tr[data-sym]").forEach(tr=>{
+      if(EXPANDED.has(tr.dataset.sym)) openRow(tr);
+    });
     window.scrollTo({top:keepY,behavior:"instant"});
+    if(k==="w"&&!PCRX) fetch("sheet_data.json?t="+Date.now()).then(r=>r.json()).then(m=>{
+      PCRX={}; HISTD=m.pcrHist||[];
+      m.sectors.forEach(sec=>sec.rows.forEach(r=>{if(r.pcr)PCRX[r.symbol]=r.pcr;}));
+      document.querySelectorAll("tr.det-row").forEach(x=>x.remove());
+      document.querySelectorAll("tr[data-sym]").forEach(tr=>{
+        tr.classList.remove("open");
+        if(EXPANDED.has(tr.dataset.sym)) openRow(tr);
+      });
+    }).catch(()=>{});
   }).catch(e=>document.getElementById("meta").textContent="failed to load "+v.file()+": "+e);
 }
 function toggleSec(h){
