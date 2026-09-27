@@ -10,7 +10,7 @@ rollover built" may be one finding counted twice.
 import statistics as st, sys
 from screen import load, score_expiry, forward_return, MIN_HIST
 from sectors import sector_map
-from decompose import sub, ROLL, COST, N
+from decompose import sub, ROLL, COST, PCR, N
 
 
 def collect(tests=27, n=N):
@@ -24,18 +24,26 @@ def collect(tests=27, n=N):
         if len(rec) < 3 * n:
             continue
         u = st.mean(fwd[s] for s in rec)
-        rs, cs = sub(rec, ROLL), sub(rec, COST)
+        rs, cs, ps = sub(rec, ROLL), sub(rec, COST), sub(rec, PCR)
         cost_bot = sorted(cs, key=lambda s: cs[s])[:n]
+        pcr_bot = sorted(ps, key=lambda s: ps[s])[:n]
+        # COST-bottom and PCR-bottom overlap by ~0.5 names of 10, so they are
+        # near-independent selections. Test the combination rather than assume
+        # two weak shorts add up.
+        cp = sub(rec, COST + PCR)
+        both_bot = sorted(cp, key=lambda s: cp[s])[:n]
         down = [s for s in rec if rec[s]["mom"] < 0 and s in rs]
         div_up = sorted(down, key=lambda s: -rs[s])[:n]
         roll_bot = sorted(rs, key=lambda s: rs[s])[:n]
         for name, names in (("COST bottom (short)", cost_bot),
+                            ("PCR bottom (short)", pcr_bot),
+                            ("COST+PCR bottom (short)", both_bot),
                             ("DIV fell+roll↑ (long)", div_up),
                             ("ROLLOVER bottom", roll_bot)):
             if names:
                 per.setdefault(name, []).append(
                     (exps[i], st.mean(fwd[s] for s in names) - u))
-        picks.append((exps[i], set(cost_bot), set(div_up)))
+        picks.append((exps[i], set(cost_bot), set(div_up), set(pcr_bot)))
     return per, picks
 
 
@@ -58,9 +66,12 @@ def main(tests=27):
         print(f"{name:<24}{ea:>+9.2f} {ha:>3}/{len(a):<6}{eb:>+9.2f} {hb:>3}/{len(b):<6}{v:>12}")
     print(f"\n  1st half: {picks[0][0]} .. {picks[len(picks)//2 - 1][0]}")
     print(f"  2nd half: {picks[len(picks)//2][0]} .. {picks[-1][0]}")
-    ov = [len(c & d) for _, c, d in picks]
+    ov = [len(c & d) for _, c, d, _ in picks]
     print(f"\n  basket overlap, COST-bottom vs DIV-fell+roll↑: mean {st.mean(ov):.1f} of {N} names"
           f"  (max {max(ov)}, min {min(ov)})")
+    op = [len(c & q) for _, c, _, q in picks]
+    print(f"  basket overlap, COST-bottom vs PCR-bottom      : mean {st.mean(op):.1f} of {N} names"
+          f"  (max {max(op)}, min {min(op)})")
     print("  -> high overlap would mean these are ONE finding counted twice")
 
 

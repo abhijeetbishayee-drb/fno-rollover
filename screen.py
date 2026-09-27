@@ -6,12 +6,19 @@ history says things drift.
 Scoring is point-in-time. score_expiry(idx) uses ONLY expiries[:idx+1], so a
 forward test cannot leak information from the future it is trying to predict.
 """
-import collections, csv, statistics as st
+import collections, csv, functools, statistics as st
 from pathlib import Path
 from sectors import sector_map, viable_sectors
 
 KEYS = ["roll_vs_prev", "roll_vs_own", "roll_vs_sec", "cost_vs_prev", "cost_vs_own", "cost_vs_sec"]
+
+# PCR is computed and exposed but is NOT in KEYS, so it does not move the
+# composite score. Folding an untested input into a composite is how the one
+# surviving result in this project would get diluted without anyone noticing.
+# Promote these into KEYS only on split-sample evidence -- see split_test.py.
+PCR_KEYS = ["pcr_vs_prev", "pcr_vs_wk", "pcr_vs_own", "pcr_vs_sec"]
 MIN_HIST = 4
+MIN_PCR_HIST = 2       # a trailing PCR average over one expiry is that expiry
 
 
 def load(path=None):
@@ -21,6 +28,26 @@ def load(path=None):
     for r in rows:
         by[r["symbol"]][r["expiry"]] = r
     return by, sorted({r["expiry"] for r in rows})
+
+
+@functools.lru_cache(maxsize=None)
+def pcr_map(path=None):
+    """(expiry, kind) -> {symbol: pcr}, from the committed PCR series.
+
+    Memoised: score_expiry runs once per window and split_test walks 27 of
+    them, so an unmemoised reader would re-parse an 11.5k-row CSV 27 times.
+    viable_sectors had exactly this bug and was re-fetching over the network.
+
+    Missing file is tolerated: the screen predates PCR and must still run
+    without it. Missing is NOT the same as zero -- callers get no key at all.
+    """
+    p = Path(path or Path(__file__).resolve().parent / "data" / "pcr_history.csv")
+    out = collections.defaultdict(dict)
+    if not p.exists():
+        return out
+    for r in csv.DictReader(p.open()):
+        out[(r["expiry"], r["kind"])][r["symbol"]] = float(r["pcr"])
+    return out
 
 
 def _z(vals):
@@ -35,6 +62,9 @@ def score_expiry(by, exps, idx, sm=None):
     cur, prev = exps[idx], exps[idx - 1]
     past = exps[:idx]                      # strictly before cur
     sm = sm if sm is not None else sector_map()
+    pm = pcr_map()
+    pc_cur, pc_wk = pm.get((cur, "on"), {}), pm.get((cur, "wk"), {})
+    pc_prev = pm.get((prev, "on"), {})
     rec = {}
     for s, d in by.items():
         if cur not in d or prev not in d:
@@ -52,6 +82,20 @@ def score_expiry(by, exps, idx, sm=None):
             "cost_vs_own": cost - st.mean(float(h["rollover_cost_pct"]) for h in hist),
             "sector": sm.get(s),
         }
+        # PCR, same point-in-time rule: `cur` is an expiry-day reading, and the
+        # trailing average sees only `past`.
+        if s in pc_cur:
+            v = pc_cur[s]
+            rec[s]["pcr"] = v
+            if s in pc_wk:
+                rec[s]["pcr_wk"] = pc_wk[s]
+                rec[s]["pcr_vs_wk"] = v - pc_wk[s]
+            if s in pc_prev:
+                rec[s]["pcr_vs_prev"] = v - pc_prev[s]
+            back = [pm[(e, "on")][s] for e in past
+                    if (e, "on") in pm and s in pm[(e, "on")]]
+            if len(back) >= MIN_PCR_HIST:
+                rec[s]["pcr_vs_own"] = v - st.mean(back)
     groups = collections.defaultdict(list)
     for s, v in rec.items():
         if v["sector"]:
@@ -65,6 +109,11 @@ def score_expiry(by, exps, idx, sm=None):
         for m in members:
             rec[m]["roll_vs_sec"] = rec[m]["roll"] - ravg
             rec[m]["cost_vs_sec"] = rec[m]["cost"] - cavg
+        withp = [m for m in members if "pcr" in rec[m]]
+        if len(withp) >= 2:
+            pavg = st.mean(rec[m]["pcr"] for m in withp)
+            for m in withp:
+                rec[m]["pcr_vs_sec"] = rec[m]["pcr"] - pavg
     zf = {k: _z([v[k] for v in rec.values() if k in v]) for k in KEYS
           if any(k in v for v in rec.values())}
     for v in rec.values():

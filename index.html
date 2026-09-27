@@ -18,7 +18,7 @@
   .sechead b{color:var(--accent);font-size:13px}
   .stats{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
   .scroll{overflow-x:auto}
-  table{border-collapse:collapse;width:100%;min-width:940px;font-variant-numeric:tabular-nums}
+  table{border-collapse:collapse;width:100%;min-width:1120px;font-variant-numeric:tabular-nums}
   th,td{padding:6px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid #1e2128}
   th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
      position:sticky;top:0;background:#1b1e24}
@@ -35,6 +35,8 @@
   .tabs select{background:#1b1e24;color:var(--fg);border:1px solid var(--line);
     border-radius:7px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
   .tabs select:hover{border-color:var(--accent)}
+  td.pcrc{background:#14161b}
+  th.pcrc{background:#191c22}
   td.sym span{cursor:pointer;border-bottom:1px dotted #4a4f59}
   td.sym span:hover{color:var(--accent);border-bottom-color:var(--accent)}
   tr.open td{background:#1c1f26}
@@ -67,7 +69,10 @@
   <br><b>Click any symbol</b> for its Put-Call Ratio — total PE open interest over total CE open interest
   across all of that stock's live option contracts. Stock options have no weekly expiry, so unlike the
   Nifty PCR tracker, <b>WOW</b> and <b>MOM</b> here are the same measure one week and one month apart,
-  not two different expiries priced on the same day.</p>
+  not two different expiries priced on the same day. The three PCR columns are shown but are
+  <b>deliberately excluded from SCORE</b>: over 27 windows a cost+PCR short basket returned
+  −1.01pp against cost alone at −1.18pp, so folding PCR in made the one surviving
+  signal worse, not better.</p>
   <div id="out"></div>
 </div>
 <script>
@@ -81,7 +86,7 @@ const nse=s=>`https://www.nseindia.com/get-quotes/derivatives?symbol=${encodeURI
 const VIEW={
  m:{file:()=>{const p=document.getElementById("pick");
        return (p&&p.value)||"sheet_data.json";},
-    head:["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll -1","roll -2","score"],
+    head:["symbol","spot","M_O_M","future","basis","rollover","avg roll","DIIF","cost","avg cost","roll -1","roll -2","PCR","\u0394wk","\u0394mo","score"],
     meta:d=>`expiry ${d.expiry} \u00b7 previous ${d.prevExpiry} \u00b7 ${d.count} names \u00b7 ${d.sectors.length} sectors \u00b7 built ${d.generatedAt}`,
     stat:s=>`n=${s.count} \u00b7 avg M_O_M <span class="${sign(s.avgMom)}">${sgn(s.avgMom)}</span> \u00b7 avg rollover ${f(s.avgRoll)}% \u00b7 avg cost ${f(s.avgCost)}`,
     row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.M_O_M)}">${sgn(r.M_O_M)}</td>
@@ -90,6 +95,9 @@ const VIEW={
       <td class="${sign(r.DIIF)}">${sgn(r.DIIF)}</td>
       <td>${f(r.rollover_cost)}</td><td class="dimc">${f(r.avg_cost)}</td>
       <td class="dimc">${f(r.rollover_prev)}</td><td class="dimc">${f(r.rollover_prev2)}</td>
+      <td class="pcrc">${f(r.pcr&&r.pcr.pcr)}</td>
+      <td class="pcrc ${sign(r.pcr&&r.pcr.wow)}">${sgn(r.pcr&&r.pcr.wow)}</td>
+      <td class="pcrc ${sign(r.pcr&&r.pcr.mom)}">${sgn(r.pcr&&r.pcr.mom)}</td>
       <td class="${sign(r.score)}">${sgn(r.score)}</td>`},
  w:{file:()=>"weekly_data.json",
     head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","score"],
@@ -200,7 +208,7 @@ function load(k){
           <b>${s.sector}</b><span class="stats">${v.stat(s)}</span>
         </div>
         <div class="scroll"><table>
-          <thead><tr>${v.head.map((h,i)=>`<th class="${i===0?'sym':''}">${h}</th>`).join("")}</tr></thead>
+          <thead><tr>${v.head.map((h,i)=>`<th class="${i===0?'sym':/^(PCR|\u0394wk|\u0394mo)$/.test(h)?'pcrc':''}">${h}</th>`).join("")}</tr></thead>
           <tbody>${s.rows.map(r=>rowHTML(r,v)).join("")}</tbody>
         </table></div>
       </div>`).join("");

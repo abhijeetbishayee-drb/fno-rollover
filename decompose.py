@@ -7,12 +7,13 @@ which are a different selection rule from "highest composite", not a subset of i
 Same point-in-time discipline: scoring at E, return measured E -> E+1.
 """
 import statistics as st, sys
-from screen import load, score_expiry, forward_return, MIN_HIST
+from screen import load, score_expiry, forward_return, MIN_HIST, KEYS, PCR_KEYS
 from sectors import sector_map
 
 N = 10
 ROLL = ["roll_vs_prev", "roll_vs_own", "roll_vs_sec"]
 COST = ["cost_vs_prev", "cost_vs_own", "cost_vs_sec"]
+PCR = PCR_KEYS
 
 
 def _z(vals):
@@ -47,12 +48,17 @@ def run(tests=7, n=N):
         if len(rec) < 3 * n:
             continue
         u = st.mean(fwd.values() for _ in [0]) if False else st.mean(fwd[s] for s in rec)
-        rs, cs = sub(rec, ROLL), sub(rec, COST)
+        rs, cs, ps = sub(rec, ROLL), sub(rec, COST), sub(rec, PCR)
+        # what the composite WOULD be if PCR joined KEYS -- the question behind
+        # "add PCR as a column in the screen", tested rather than assumed
+        cp = sub(rec, KEYS + PCR)
         variants = {
             "step1 MOM":        sorted(rec, key=lambda s: -rec[s]["mom"]),
             "step2 ROLLOVER":   sorted(rs,  key=lambda s: -rs[s]),
             "step3 COST":       sorted(cs,  key=lambda s: -cs[s]),
+            "step4 PCR":        sorted(ps,  key=lambda s: -ps[s]),
             "composite":        sorted(rec, key=lambda s: -rec[s]["score"]),
+            "composite+PCR":    sorted(cp,  key=lambda s: -cp[s]),
         }
         for name, rank in variants.items():
             top, bot = rank[:n], rank[-n:]
