@@ -26,6 +26,11 @@ jobs:
         # lands here silently. Fail loudly instead -- the 2026-09-06 Android
         # parity incident happened because nothing tested this.
         run: python parity_check.py
+      - name: Prove the parity checks can still fail
+        # A green gate that cannot go red is not a gate. Check [5] was once
+        # `"st.mean" in source` and would have passed on a comment; this
+        # injects a violation per check and asserts each one catches it.
+        run: python test_parity_negative.py
 
       - name: Capture latest trading day
         run: python update.py

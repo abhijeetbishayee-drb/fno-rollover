@@ -12,6 +12,9 @@ import csv, glob, json, statistics as st, sys
 from pathlib import Path
 import sectors as ours
 
+# Module-level so test_parity_negative.py can point check [5] at a mutated copy.
+SHEET = Path(__file__).resolve().parent / "sheet_data.json"
+
 DECLARED = {
     "cash_only": "heatmap PLOTS cash-only names (dashed tile); we exclude them — "
                  "they have no futures, so no OI/rollover/cost exists to screen",
@@ -52,10 +55,15 @@ def main():
     print(f"[2] membership         : {len(mine)} names, {len(bad)} disagree  "
           f"{'OK' if not bad else 'FAIL'}")
 
-    # 3. names we map that the board does not know at all
+    # 3. names we map that the board does not know at all. sector_map() derives
+    # our map FROM FNO_SECTORS, so this is structurally impossible -- which is
+    # exactly why it must fail rather than print REVIEW: if it ever fires, the
+    # derivation in sectors.py has broken, and an advisory line would let that
+    # through the weekly gate unnoticed.
     unknown = sorted(set(mine) - set(hm_sec))
+    if unknown: fails.append(f"names we map that the board does not know: {unknown}")
     print(f"[3] names not on board : {unknown if unknown else 'none'}  "
-          f"{'OK' if not unknown else 'REVIEW'}")
+          f"{'OK' if not unknown else 'FAIL'}")
 
     # 4. cash-only exclusion is total (declared divergence, but must be clean)
     leaked = sorted(set(mine) & cash)
@@ -71,7 +79,7 @@ def main():
     # recomputed equal-weighted mean, which an OI- or cap-weighted change fails.
     worst, checked = 0.0, 0
     try:
-        doc = json.loads((Path(__file__).resolve().parent / "sheet_data.json").read_text())
+        doc = json.loads(SHEET.read_text())
     except FileNotFoundError:
         doc = None
     if doc is None:
