@@ -8,7 +8,8 @@ re-runnable, not a one-off eyeball.
 Divergences are not automatically failures. Some are STRUCTURAL and justified.
 They must be DECLARED here, so an undeclared one is what fails.
 """
-import csv, glob, statistics as st, sys
+import csv, glob, json, statistics as st, sys
+from pathlib import Path
 import sectors as ours
 
 DECLARED = {
@@ -62,11 +63,34 @@ def main():
     print(f"[4] cash-only excluded : {len(cash)} on board, {len(leaked)} leaked  "
           f"{'OK' if not leaked else 'FAIL'}")
 
-    # 5. aggregation method matches: equal-weighted mean over members with data
-    src = open(ours.__file__).read() + open("analyse.py").read()
-    ew = "st.mean" in src
-    print(f"[5] equal-weighted mean: {'OK — matches build_sectors' if ew else 'FAIL'}")
-    if not ew: fails.append("aggregation is not an equal-weighted mean")
+    # 5. aggregation method matches: equal-weighted mean over members with data.
+    # This used to grep the source for the string "st.mean", which is not a test
+    # of anything -- it passed on a comment and broke the moment the averaging
+    # moved file (2026-09-27, when analyse.py stopped duplicating screen.py).
+    # Now it checks the PUBLISHED sector aggregate against an independently
+    # recomputed equal-weighted mean, which an OI- or cap-weighted change fails.
+    worst, checked = 0.0, 0
+    try:
+        doc = json.loads((Path(__file__).resolve().parent / "sheet_data.json").read_text())
+    except FileNotFoundError:
+        doc = None
+    if doc is None:
+        print("[5] equal-weighted mean: SKIP — sheet_data.json not built yet")
+    else:
+        for sec in doc["sectors"]:
+            rolls = [r["rollover"] for r in sec["rows"] if r.get("rollover") is not None]
+            costs = [r["rollover_cost"] for r in sec["rows"] if r.get("rollover_cost") is not None]
+            if not rolls or not costs:
+                continue
+            worst = max(worst, abs(st.mean(rolls) - sec["avgRoll"]),
+                        abs(st.mean(costs) - sec["avgCost"]))
+            checked += 1
+        ew = worst <= 0.005                     # published values are rounded to 2-3dp
+        print(f"[5] equal-weighted mean: {'OK — matches build_sectors' if ew else 'FAIL'}"
+              f"  ({checked} sectors, worst deviation {worst:.4f})")
+        if not ew:
+            fails.append(f"sector aggregate is not an equal-weighted mean "
+                         f"(worst deviation {worst:.4f})")
 
     print("\nDECLARED structural divergences (intentional):")
     for k, v in DECLARED.items():
