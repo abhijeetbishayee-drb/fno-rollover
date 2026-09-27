@@ -24,6 +24,13 @@ OUT = ROOT / "data" / "pcr_history.csv"
 COLS = ["expiry", "kind", "asof", "symbol", "pcr", "ce", "pe",
         "max_ce", "max_pe", "opt_expiry"]
 
+# The weekly view runs on its own date grid (weekly_snapshots.csv), not on
+# expiries, so it needs its own series. Borrowing the monthly expiry-day number
+# would put a reading up to five weeks stale next to a week-on-week column.
+SNAP = ROOT / "data" / "weekly_snapshots.csv"
+WOUT = ROOT / "data" / "pcr_weekly.csv"
+WCOLS = ["asof", "symbol", "pcr", "ce", "pe"]
+
 from backfill import fetch                                   # noqa: E402
 from pcr import pcr_on, peak_strikes                         # noqa: E402
 
@@ -63,6 +70,38 @@ def rows_for(expiry, kind, back=10):
     return out
 
 
+def weekly():
+    """PCR at every weekly snapshot date. Incremental, like the expiry series."""
+    if not SNAP.exists():
+        print("  no weekly_snapshots.csv -- skipping weekly PCR")
+        return
+    dates = sorted({r["asof"] for r in csv.DictReader(SNAP.open())})
+    have = list(csv.DictReader(WOUT.open())) if WOUT.exists() else []
+    seen = {r["asof"] for r in have}
+    added = 0
+    for d in dates:
+        if d in seen:
+            continue
+        raw = fetch(_d(d))
+        if not raw:
+            print(f"  WARN no bhavcopy on weekly date {d}")
+            continue
+        for sym, (val, ce, pe) in sorted(pcr_on(raw).items()):
+            if val is None:
+                continue
+            have.append({"asof": d, "symbol": sym, "pcr": val,
+                         "ce": int(ce), "pe": int(pe)})
+            added += 1
+        print(f"  + weekly {d}", flush=True)
+    have.sort(key=lambda r: (r["asof"], r["symbol"]))
+    with WOUT.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=WCOLS)
+        w.writeheader()
+        w.writerows(have)
+    print(f"pcr_weekly.csv: {len(have)} rows ({added} new) across "
+          f"{len({r['asof'] for r in have})} weeks")
+
+
 def main():
     expiries = [e["expiry"] for e in
                 json.loads((ROOT / "expiries.json").read_text())["expiries"]]
@@ -88,6 +127,7 @@ def main():
         w.writerows(have)
     print(f"pcr_history.csv: {len(have)} rows ({added} new) across "
           f"{len({r['expiry'] for r in have})} expiries")
+    weekly()
 
 
 if __name__ == "__main__":

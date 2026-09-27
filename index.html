@@ -18,7 +18,7 @@
   .sechead b{color:var(--accent);font-size:13px}
   .stats{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
   .scroll{overflow-x:auto}
-  table{border-collapse:collapse;width:100%;min-width:1120px;font-variant-numeric:tabular-nums}
+  table{border-collapse:collapse;width:100%;min-width:1180px;font-variant-numeric:tabular-nums}
   th,td{padding:6px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid #1e2128}
   th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
      position:sticky;top:0;background:#1b1e24}
@@ -100,7 +100,7 @@ const VIEW={
       <td class="pcrc ${sign(r.pcr&&r.pcr.mom)}">${sgn(r.pcr&&r.pcr.mom)}</td>
       <td class="${sign(r.score)}">${sgn(r.score)}</td>`},
  w:{file:()=>"weekly_data.json",
-    head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","score"],
+    head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","PCR","\u0394wk","\u0394mo","score"],
     meta:d=>`week ${d.asof} vs ${d.prevWeek} \u00b7 near expiry ${(d.sectors[0]?.rows[0]?.near_expiry)||"\u2013"} \u00b7 ${d.count} names \u00b7 ${d.weeksAvailable} weeks of history \u00b7 built ${d.generatedAt}`,
     stat:s=>`n=${s.count} \u00b7 avg W_O_W <span class="${sign(s.avgWow)}">${sgn(s.avgWow)}</span> \u00b7 avg \u0394OI <span class="${sign(s.avgOiChg)}">${sgn(s.avgOiChg)}</span>% \u00b7 avg cost ${f(s.avgCost)}`,
     row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.W_O_W)}">${sgn(r.W_O_W)}</td>
@@ -108,6 +108,9 @@ const VIEW={
       <td class="dimc">${big(r.oi_total)}</td><td class="${sign(r.oi_chg_pct)}">${sgn(r.oi_chg_pct)}</td>
       <td>${f(r.roll_so_far)}</td><td>${f(r.cost)}</td>
       <td class="${sign(r.cost_chg)}">${sgn(r.cost_chg)}</td>
+      <td class="pcrc">${f(r.pcr&&r.pcr.pcr)}</td>
+      <td class="pcrc ${sign(r.pcr&&r.pcr.wow)}">${sgn(r.pcr&&r.pcr.wow)}</td>
+      <td class="pcrc ${sign(r.pcr&&r.pcr.mom)}">${sgn(r.pcr&&r.pcr.mom)}</td>
       <td class="${sign(r.score)}">${sgn(r.score)}</td>`}
 };
 
@@ -117,7 +120,7 @@ const VIEW={
 // one month apart -- NOT the weekly-expiry vs monthly-expiry pair the Nifty PCR
 // tracker shows, because stock options have no weekly expiry at all. See pcr.py.
 const EXPANDED=new Set();
-let ROWS={}, HISTD=[], PCRX=null;
+let ROWS={}, HISTD=[], VK="m", ASOF="";
 
 function rowHTML(r,v){
   return `<tr data-sym="${r.symbol}"><td class="sym"><span onclick="toggleRow(this)"
@@ -144,8 +147,7 @@ function openRow(tr){
 }
 function pcrOf(sym){
   const r=ROWS[sym];
-  if(r&&r.pcr) return r.pcr;
-  return (PCRX&&PCRX[sym])||null;   // weekly rows carry no PCR of their own
+  return (r&&r.pcr)||null;
 }
 const last_i=pts=>pts[pts.length-1][0];
 function spark(vals){
@@ -174,19 +176,20 @@ function panel(sym){
               `${f(p.pcrWk)} \u2192 ${f(p.pcr)}`);
   const mom = p.mom==null?"" : cell("MOM",sgn(p.mom),"mid "+sign(p.mom),
               `${f(p.pcrPrev)} \u2192 ${f(p.pcr)}`);
-  const sp = p.hist ? `<div class="spark"><div class="k">PCR by expiry</div>${spark(p.hist)}</div>` : "";
+  const per = VK==="w" ? "week" : "expiry";
+  const sp = p.hist ? `<div class="spark"><div class="k">PCR by ${per}</div>${spark(p.hist)}</div>` : "";
   const bits=[`CE OI ${big(p.ce)}`,`PE OI ${big(p.pe)}`];
   if(p.maxCE!=null) bits.push(`peak CE ${big(p.maxCE)}`);
   if(p.maxPE!=null) bits.push(`peak PE ${big(p.maxPE)}`);
   if(p.expiry) bits.push(`contract ${p.expiry}`);
-  return `<div class="pcr">${cell("PCR",f(p.pcr),"big")}${wow}${mom}${sp}</div>
+  return `<div class="pcr">${cell("PCR",f(p.pcr),"big",ASOF?`as of ${ASOF}`:"")}${wow}${mom}${sp}</div>
     <div class="pcrfoot">${bits.join(" \u00b7 ")} \u00b7
       <a href="${nse(sym)}" target="_blank" rel="noopener">open on NSE</a></div>`;
 }
 
 const COLLAPSED=new Set();          // survives view switches
 function load(k){
-  const v=VIEW[k];
+  const v=VIEW[k]; VK=k;
   // Both views must present sectors in the SAME order, otherwise restoring the
   // scroll position lands you on a different sector -- the two would not track.
   // That order is average rollover cost, fixed at BUILD time in
@@ -199,7 +202,7 @@ function load(k){
   document.getElementById("pick").style.display = k==="m"?"":"none";
   fetch(v.file()+"?t="+Date.now()).then(r=>r.json()).then(d=>{
     document.getElementById("meta").textContent=v.meta(d);
-    ROWS={}; HISTD=d.pcrHist||[];
+    ROWS={}; HISTD=d.pcrHist||[]; ASOF=d.expiry||d.asof||"";
     d.sectors.forEach(sec=>sec.rows.forEach(r=>{ROWS[r.symbol]=r;}));
     const ordered=d.sectors;   // canonical order baked in at build time
     document.getElementById("out").innerHTML=ordered.map(s=>`
@@ -220,15 +223,7 @@ function load(k){
       if(EXPANDED.has(tr.dataset.sym)) openRow(tr);
     });
     window.scrollTo({top:keepY,behavior:"instant"});
-    if(k==="w"&&!PCRX) fetch("sheet_data.json?t="+Date.now()).then(r=>r.json()).then(m=>{
-      PCRX={}; HISTD=m.pcrHist||[];
-      m.sectors.forEach(sec=>sec.rows.forEach(r=>{if(r.pcr)PCRX[r.symbol]=r.pcr;}));
-      document.querySelectorAll("tr.det-row").forEach(x=>x.remove());
-      document.querySelectorAll("tr[data-sym]").forEach(tr=>{
-        tr.classList.remove("open");
-        if(EXPANDED.has(tr.dataset.sym)) openRow(tr);
-      });
-    }).catch(()=>{});
+
   }).catch(e=>document.getElementById("meta").textContent="failed to load "+v.file()+": "+e);
 }
 function toggleSec(h){

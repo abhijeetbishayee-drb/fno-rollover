@@ -34,25 +34,30 @@ jobs:
 
       - name: Capture latest trading day
         run: python update.py
-      - name: Rebuild the hosted sheets (monthly + weekly)
+      - name: Rebuild the hosted sheets and the PCR series
+        # ORDER IS LOAD-BEARING, each step consumes the one above:
+        #   build_sheet_json -> expiries.json, which backfill_pcr reads
+        #   backfill_pcr     -> pcr_history.csv AND pcr_weekly.csv
+        #   build_pcr_json   -> merges monthly PCR, rewrites sheet_data.json
+        #   weekly_sheet     -> needs pcr_weekly.csv for its own PCR columns,
+        #                       and sheet_data.json for the canonical sector
+        #                       order that keeps the two views scrolling together
+        # backfill_pcr only fetches dates its CSVs do not already cover -- two
+        # per new expiry plus one per new week. Deriving PCR from data/bhav/
+        # instead would re-download ~80 bhavcopies every run, that cache being
+        # gitignored and a fresh runner empty.
         run: |
           python scripts/build_sheet_json.py
-          python weekly_sheet.py
-
-      - name: Extend and merge the per-stock PCR series
-        # backfill_pcr.py only fetches dates pcr_history.csv does not cover --
-        # two per new expiry, none in a week with no expiry. Computing PCR from
-        # data/bhav/ instead would re-download ~56 bhavcopies every run, because
-        # that cache is gitignored and a fresh runner starts empty.
-        run: |
           python backfill_pcr.py
           python scripts/build_pcr_json.py
+          python weekly_sheet.py
 
       - name: Commit if the series grew
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A data/weekly_snapshots.csv data/pcr_history.csv \
+                     data/pcr_weekly.csv \
                      data/nse_industry_cache.csv \
                      sheet_data.json weekly_data.json expiries.json 'sheet_*.json'
           if git diff --cached --quiet; then

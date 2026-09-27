@@ -12,6 +12,57 @@ from sectors import sector_map
 
 ROOT = Path(__file__).resolve().parent
 SNAP = ROOT / "data" / "weekly_snapshots.csv"
+PCRW = ROOT / "data" / "pcr_weekly.csv"
+HIST = 26          # sparkline points; the full weekly series
+MOM_WEEKS = 4      # weekly grid, so "a month ago" is 4 snapshots back
+
+
+def pcr_weekly():
+    """asof -> {symbol: (pcr, ce, pe)}, from the committed weekly PCR series.
+
+    Read-only and tolerant of absence: the weekly sheet predates PCR and must
+    still build without it. Missing is not zero -- a row simply gets no `pcr`.
+    """
+    out = collections.defaultdict(dict)
+    if not PCRW.exists():
+        return out
+    for r in csv.DictReader(PCRW.open()):
+        out[r["asof"]][r["symbol"]] = (float(r["pcr"]), int(float(r["ce"])),
+                                       int(float(r["pe"])))
+    return out
+
+
+def attach_pcr(out, weeks, cur):
+    """Add a `pcr` object per row. WOW is against the previous snapshot and MOM
+    against four back -- both TIME comparisons on the weekly grid, matching the
+    monthly sheet's definitions rather than the Nifty tracker's expiry pair,
+    because stock options have no weekly expiry to compare against."""
+    pw = pcr_weekly()
+    if not pw:
+        return []
+    i = weeks.index(cur)
+    prev_w = weeks[i - 1] if i >= 1 else None
+    prev_m = weeks[i - MOM_WEEKS] if i >= MOM_WEEKS else None
+    past = weeks[max(0, i - HIST + 1):i + 1]
+    now = pw.get(cur, {})
+    for r in out:
+        rec = now.get(r["symbol"])
+        if not rec:
+            continue
+        val, ce, pe = rec
+        p = {"pcr": round(val, 4), "ce": ce, "pe": pe}
+        for label, wk in (("Wk", prev_w), ("Prev", prev_m)):
+            got = pw.get(wk, {}).get(r["symbol"]) if wk else None
+            if got:
+                p["pcr" + label] = round(got[0], 4)
+                p["wow" if label == "Wk" else "mom"] = round(val - got[0], 4)
+        if prev_w:
+            p["wkDate"] = prev_w
+        series = [(pw.get(w, {}).get(r["symbol"]) or (None,))[0] for w in past]
+        if sum(v is not None for v in series) > 1:
+            p["hist"] = [round(v, 4) if v is not None else None for v in series]
+        r["pcr"] = p
+    return past
 
 
 def build():
@@ -54,6 +105,7 @@ def build():
 
 def emit():
     rows, cur, prev, weeks = build()
+    past = attach_pcr(rows, weeks, cur)
     g = collections.defaultdict(list)
     for r in rows:
         g[r["sector"]].append(r)
@@ -75,13 +127,16 @@ def emit():
     else:
         sectors.sort(key=lambda s: -s["avgOiChg"])
     doc = {"asof": cur, "prevWeek": prev, "weeksAvailable": len(weeks),
+           "pcrHist": past,
            "count": len(rows), "sectors": sectors,
            "generatedAt": datetime.now(timezone.utc).replace(microsecond=0)
            .isoformat().replace("+00:00", "Z")}
     p = ROOT / "weekly_data.json"
     p.write_text(json.dumps(doc, separators=(",", ":")))
+    n = sum(1 for r in rows if "pcr" in r)
     print(f"wrote {p.name}: {len(rows)} names, {len(sectors)} sectors, "
-          f"week {cur} vs {prev} ({len(weeks)} weeks available)")
+          f"week {cur} vs {prev} ({len(weeks)} weeks available); "
+          f"{n}/{len(rows)} rows with PCR")
 
 
 if __name__ == "__main__":
