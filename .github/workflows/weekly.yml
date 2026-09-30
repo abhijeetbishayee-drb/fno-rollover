@@ -2,7 +2,20 @@ name: weekly snapshot
 
 on:
   schedule:
-    - cron: "0 4 * * 6"        # Saturdays 04:00 UTC = 09:30 IST, after the week closes
+    # Tuesdays 14:30 UTC = 20:00 IST, i.e. after Tuesday's close and before
+    # Wednesday's open. The window is bounded at BOTH ends and this sits well
+    # inside it: derivatives close 15:40 IST, the F&O bhavcopy this whole repo
+    # reads is published ~18:00-18:30 IST, and the next session opens 09:15 IST
+    # Wednesday. So 20:00 IST leaves ~1.5h of margin after publication and ~13h
+    # before the open.
+    #
+    # TUESDAY specifically, not an arbitrary weekday: the monthly stock-futures
+    # expiry is the last TUESDAY of the month (the convention moved from
+    # Thursday inside this repo's own backfill window). Running Tuesday evening
+    # catches the roll the same day instead of leaving the monthly sheet stale
+    # until the weekend. backfill.py --extend was changed from "< today" to
+    # "<= today" for exactly this reason.
+    - cron: "30 14 * * 2"
   workflow_dispatch:
 
 permissions:

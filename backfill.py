@@ -139,8 +139,14 @@ def extend(look_back=3):
     y, m = today.year, today.month
     for _ in range(look_back):
         e = expiry_of_month(y, m)
-        # strictly BEFORE today: an expiry still in progress has no final roll
-        if e and e < today.isoformat() and e not in have:
+        # <= today, NOT < today. The job now runs on Tuesday evening and the
+        # monthly expiry IS a Tuesday, so a "strictly before today" test would
+        # skip the very roll the schedule exists to catch and defer it a week.
+        # Completeness is decided by the BHAVCOPY, not the calendar: NSE
+        # publishes it only after the close, so metrics_on() returning rows is
+        # itself proof the session finished. Run too early and it returns None,
+        # which warns and appends nothing.
+        if e and e <= today.isoformat() and e not in have:
             wanted.append(e)
         m -= 1
         if m == 0:
@@ -150,16 +156,25 @@ def extend(look_back=3):
               f"newest {max(have) if have else 'none'})")
         return 0
 
-    added = []
+    added, stale = [], []
     for e in sorted(wanted):
         got = metrics_on(e)
         if not got:
-            print(f"  WARN expiry {e}: no usable rows -- not appended")
+            # Missing on the expiry day ITSELF is a timing race, not a fault:
+            # the bhavcopy simply is not out yet and the next run will get it.
+            # Missing for an expiry already in the PAST is a real fault.
+            when = "not published yet" if e == today.isoformat() else "MISSING"
+            print(f"  WARN expiry {e}: bhavcopy {when} -- not appended")
+            if e != today.isoformat():
+                stale.append(e)
             continue
         existing.extend(got)
         added.append((e, len(got)))
     if not added:
-        return 1
+        # Exit non-zero only for the real fault. Failing on the timing race
+        # would abort the job AFTER update.py captured a valid weekly snapshot,
+        # discarding it over a race that resolves itself on the next run.
+        return 1 if stale else 0
     fields = fields or list(added and existing[0].keys())
     existing.sort(key=lambda r: (r["expiry"], r["symbol"]))
     with outp.open("w", newline="") as fh:
