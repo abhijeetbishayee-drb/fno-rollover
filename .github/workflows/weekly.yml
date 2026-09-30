@@ -34,6 +34,14 @@ jobs:
 
       - name: Capture latest trading day
         run: python update.py
+      - name: Extend the MONTHLY series if an expiry has completed
+        # Without this the monthly sheet cannot advance at all. update.py only
+        # appends weekly snapshots, and backfill.main() is a full rewrite nobody
+        # runs on a schedule -- so the sheet sat frozen on the 2026-08-25 expiry
+        # while the September roll completed on 2026-09-29, with the weekly view
+        # updating beside it making the page look alive. --extend is append-only
+        # and a no-op when nothing has completed.
+        run: python backfill.py --extend
       - name: Rebuild the hosted sheets and the PCR series
         # ORDER IS LOAD-BEARING, each step consumes the one above:
         #   build_sheet_json -> expiries.json, which backfill_pcr reads
@@ -56,7 +64,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A data/weekly_snapshots.csv data/pcr_history.csv \
+          git add -A data/rollover_history.csv data/weekly_snapshots.csv \
+                     data/pcr_history.csv \
                      data/pcr_weekly.csv \
                      data/nse_industry_cache.csv \
                      sheet_data.json weekly_data.json expiries.json 'sheet_*.json'

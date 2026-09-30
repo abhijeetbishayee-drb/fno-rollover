@@ -113,6 +113,66 @@ def metrics_on(expiry_iso):
     return out
 
 
+def extend(look_back=3):
+    """Append any COMPLETED expiry missing from rollover_history.csv.
+
+    This exists because nothing in the weekly job extended the monthly series:
+    update.py only appends weekly snapshots, and main() below is a full REWRITE
+    that nobody runs on a schedule. The monthly sheet was therefore structurally
+    frozen at whatever expiry the last manual backfill produced -- it sat on
+    2026-08-25 while the September roll completed on 2026-09-29, and the weekly
+    view kept updating beside it, which made the whole page look alive.
+
+    Append-only and idempotent by design: never truncates, never reorders, and
+    re-running after a completed expiry is already present is a no-op. main()
+    must stay the manual, deliberate path -- it opens the file with "w".
+    """
+    outp = ROOT / "data" / "rollover_history.csv"
+    existing, fields = [], None
+    if outp.exists():
+        rd = csv.DictReader(outp.open())
+        existing, fields = list(rd), rd.fieldnames
+    have = {r["expiry"] for r in existing}
+    today = date.today()
+
+    wanted = []
+    y, m = today.year, today.month
+    for _ in range(look_back):
+        e = expiry_of_month(y, m)
+        # strictly BEFORE today: an expiry still in progress has no final roll
+        if e and e < today.isoformat() and e not in have:
+            wanted.append(e)
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    if not wanted:
+        print(f"rollover_history.csv: up to date ({len(have)} expiries, "
+              f"newest {max(have) if have else 'none'})")
+        return 0
+
+    added = []
+    for e in sorted(wanted):
+        got = metrics_on(e)
+        if not got:
+            print(f"  WARN expiry {e}: no usable rows -- not appended")
+            continue
+        existing.extend(got)
+        added.append((e, len(got)))
+    if not added:
+        return 1
+    fields = fields or list(added and existing[0].keys())
+    existing.sort(key=lambda r: (r["expiry"], r["symbol"]))
+    with outp.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(existing)
+    for e, n in added:
+        print(f"  + expiry {e}: {n} symbols")
+    print(f"rollover_history.csv: {len(existing)} rows, "
+          f"{len(have) + len(added)} expiries (+{len(added)})")
+    return 0
+
+
 def main(n=12):
     today = date.today()
     months, y, m = [], today.year, today.month
@@ -144,4 +204,6 @@ def main(n=12):
 
 
 if __name__ == "__main__":
+    if "--extend" in sys.argv:
+        sys.exit(extend())
     main(int(sys.argv[1]) if len(sys.argv) > 1 else 12)
