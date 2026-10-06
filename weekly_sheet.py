@@ -6,15 +6,65 @@ asks "did positions move to the next series", weekly OI asks "are positions
 building or unwinding". Same question, weekly cadence.
 """
 import collections, csv, json, statistics as st
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
 from sectors import sector_map
 
 ROOT = Path(__file__).resolve().parent
 SNAP = ROOT / "data" / "weekly_snapshots.csv"
 PCRW = ROOT / "data" / "pcr_weekly.csv"
-HIST = 26          # sparkline points; the full weekly series
-MOM_WEEKS = 4      # weekly grid, so "a month ago" is 4 snapshots back
+HIST = 26          # sparkline points, one per week of elapsed time
+WOW_DAYS = 7       # "a week ago" and "a month ago" are DURATIONS, not row
+MOM_DAYS = 28      # offsets -- see below
+
+
+# ANCHORS ARE DATES, NOT ROW POSITIONS.
+#
+# This file used to take weeks[-2] as "a week ago" and weeks[-4] as "a month
+# ago", which is only true while captures land exactly one week apart. They do
+# not. The published sheet on 2026-09-30 read asof 2026-09-29 against prevWeek
+# 2026-09-25 and called it week-on-week: a FOUR-day comparison, because an
+# off-grid capture on the Tuesday expiry followed the Friday one. The label was
+# wrong and nothing could notice, since the code never looked at the dates.
+#
+# It matters much more now that the snapshot job runs DAILY: on a positional
+# rule, week-on-week would quietly become day-on-day, "a month" would become
+# four days, and the 26-point sparkline would cover five weeks instead of six
+# months -- every one of them still labelled as before. Anchoring to elapsed
+# time keeps the weekly view weekly whatever the capture cadence, and the gap
+# actually used is published per row so a stretched comparison is visible
+# rather than implied.
+
+def _d(iso):
+    return date.fromisoformat(iso)
+
+
+def nearest(days, target, exclude=()):
+    """The capture closest in TIME to `target`; ties go to the earlier one."""
+    pool = [d for d in days if d not in exclude]
+    return min(pool, key=lambda d: (abs((_d(d) - target).days), d)) if pool else None
+
+
+def anchors(days, cur):
+    """(a week back, four weeks back) as dates, each the nearest capture."""
+    c = _d(cur)
+    wk = nearest(days, c - timedelta(days=WOW_DAYS), exclude={cur})
+    mo = nearest(days, c - timedelta(days=MOM_DAYS), exclude={cur})
+    return wk, mo
+
+
+def weekly_grid(days, cur, n=HIST):
+    """`n` points one week apart ending at `cur`, nearest capture to each.
+
+    De-duplicated: a daily series has several captures per week and a sparse one
+    may have none, so the grid is however many DISTINCT weeks actually exist.
+    """
+    c, out = _d(cur), []
+    for k in range(n - 1, -1, -1):
+        d = nearest(days, c - timedelta(days=WOW_DAYS * k))
+        if d and d not in out:
+            out.append(d)
+    return out
 
 
 def pcr_weekly():
@@ -40,10 +90,8 @@ def attach_pcr(out, weeks, cur):
     pw = pcr_weekly()
     if not pw:
         return []
-    i = weeks.index(cur)
-    prev_w = weeks[i - 1] if i >= 1 else None
-    prev_m = weeks[i - MOM_WEEKS] if i >= MOM_WEEKS else None
-    past = weeks[max(0, i - HIST + 1):i + 1]
+    prev_w, prev_m = anchors(weeks, cur)
+    past = weekly_grid(weeks, cur)
     now = pw.get(cur, {})
     for r in out:
         rec = now.get(r["symbol"])
@@ -58,6 +106,7 @@ def attach_pcr(out, weeks, cur):
                 p["wow" if label == "Wk" else "mom"] = round(val - got[0], 4)
         if prev_w:
             p["wkDate"] = prev_w
+            p["wkDays"] = (_d(cur) - _d(prev_w)).days
         series = [(pw.get(w, {}).get(r["symbol"]) or (None,))[0] for w in past]
         if sum(v is not None for v in series) > 1:
             p["hist"] = [round(v, 4) if v is not None else None for v in series]
@@ -71,7 +120,8 @@ def build():
     for r in rows:
         by[r["symbol"]][r["asof"]] = r
     weeks = sorted({r["asof"] for r in rows})
-    cur, prev = weeks[-1], weeks[-2]
+    cur = weeks[-1]
+    prev = anchors(weeks, cur)[0] or weeks[-2]
     sm = sector_map()
     out = []
     for s, d in by.items():
@@ -126,7 +176,12 @@ def emit():
         sectors.sort(key=lambda s: order.get(s["sector"], 999))
     else:
         sectors.sort(key=lambda s: -s["avgOiChg"])
-    doc = {"asof": cur, "prevWeek": prev, "weeksAvailable": len(weeks),
+    # prevWeekDays is the gap ACTUALLY used. The page shows it whenever it is
+    # not 7, so a comparison stretched by a holiday or a missed capture reads
+    # as what it is instead of being labelled week-on-week regardless.
+    doc = {"asof": cur, "prevWeek": prev,
+           "prevWeekDays": (_d(cur) - _d(prev)).days,
+           "capturesAvailable": len(weeks), "weeksAvailable": len(past),
            "pcrHist": past,
            "count": len(rows), "sectors": sectors,
            "generatedAt": datetime.now(timezone.utc).replace(microsecond=0)

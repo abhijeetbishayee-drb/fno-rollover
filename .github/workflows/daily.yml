@@ -1,28 +1,33 @@
-name: weekly snapshot
+name: daily snapshot
 
 on:
   schedule:
-    # Tuesdays 14:30 UTC = 20:00 IST, i.e. after Tuesday's close and before
-    # Wednesday's open. The window is bounded at BOTH ends and this sits well
-    # inside it: derivatives close 15:40 IST, the F&O bhavcopy this whole repo
-    # reads is published ~18:00-18:30 IST, and the next session opens 09:15 IST
-    # Wednesday. So 20:00 IST leaves ~1.5h of margin after publication and ~13h
-    # before the open.
+    # EVERY WEEKDAY, not Tuesdays. Three times, because one cron is not a
+    # guarantee: the Tuesday schedule this replaced fired ZERO times -- it was
+    # added 2026-09-26, missed 2026-09-29, and every run in the repo's history
+    # is a manual dispatch. GitHub drops scheduled runs under load with no
+    # notice and no retry, so the board sat on 2026-09-30 data for a week while
+    # looking perfectly alive.
     #
-    # TUESDAY specifically, not an arbitrary weekday: the monthly stock-futures
-    # expiry is the last TUESDAY of the month (the convention moved from
-    # Thursday inside this repo's own backfill window). Running Tuesday evening
-    # catches the roll the same day instead of leaving the monthly sheet stale
-    # until the weekend. backfill.py --extend was changed from "< today" to
-    # "<= today" for exactly this reason.
-    - cron: "30 14 * * 2"
+    # The whole job is idempotent -- update.py no-ops on a date already
+    # captured, backfill --extend no-ops unless an expiry completed, and the
+    # rebuilds are deterministic -- so a duplicate run costs one bhavcopy
+    # request and commits nothing. Three chances a night is far cheaper than
+    # another silent week.
+    #
+    # Times: 20:00, 21:30 and 23:00 IST. The F&O bhavcopy this repo reads
+    # publishes ~18:00-18:30 IST and the next session opens 09:15, so all three
+    # sit inside the window with margin at both ends.
+    - cron: "30 14 * * 1-5"
+    - cron: "0 16 * * 1-5"
+    - cron: "30 17 * * 1-5"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: weekly-snapshot
+  group: daily-snapshot
   cancel-in-progress: false     # a half-written append is worse than a late run
 
 jobs:
@@ -46,6 +51,11 @@ jobs:
         run: python test_parity_negative.py
 
       - name: Capture latest trading day
+        # Already daily-shaped and idempotent: it captures the LATEST TRADING
+        # DAY, not "this week", and re-running for a captured date is a no-op.
+        # It was only ever named weekly because it was only ever RUN weekly.
+        # Running it daily turns weekly_snapshots.csv into a true daily series,
+        # which is what makes the board move between expiries at all.
         run: python update.py
       - name: Extend the MONTHLY series if an expiry has completed
         # Without this the monthly sheet cannot advance at all. update.py only
@@ -73,7 +83,7 @@ jobs:
           python scripts/build_pcr_json.py
           python weekly_sheet.py
 
-      - name: Commit if the series grew
+      - name: Commit if anything moved
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -85,6 +95,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "no change — nothing to commit"
           else
-            git commit -m "weekly snapshot $(date -u +%F)"
+            git commit -m "daily snapshot $(date -u +%F)"
             git push
           fi

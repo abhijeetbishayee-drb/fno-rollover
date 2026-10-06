@@ -139,7 +139,7 @@ const VIEW={
       <td class="${sign(r.score)}">${sgn(r.score)}</td>`},
  w:{file:()=>"weekly_data.json",
     head:["symbol","spot","W_O_W","future","basis","OI total","\u0394OI %","roll so far","cost","\u0394cost","PCR","\u0394wk","\u0394mo","score"],
-    meta:d=>`week ${d.asof} vs ${d.prevWeek} \u00b7 near expiry ${(d.sectors[0]?.rows[0]?.near_expiry)||"\u2013"} \u00b7 ${d.count} names \u00b7 ${d.weeksAvailable} weeks of history \u00b7 built ${d.generatedAt}`,
+    meta:d=>`week ${d.asof} vs ${d.prevWeek}${d.prevWeekDays&&d.prevWeekDays!==7?` (${d.prevWeekDays}d)`:""} \u00b7 near expiry ${(d.sectors[0]?.rows[0]?.near_expiry)||"\u2013"} \u00b7 ${d.count} names \u00b7 ${d.weeksAvailable} weeks of history \u00b7 built ${d.generatedAt}`,
     stat:s=>`n=${s.count} \u00b7 avg W_O_W <span class="${sign(s.avgWow)}">${sgn(s.avgWow)}</span> \u00b7 avg \u0394OI <span class="${sign(s.avgOiChg)}">${sgn(s.avgOiChg)}</span>% \u00b7 avg cost ${f(s.avgCost)}`,
     row:r=>`<td>${num(r.spot)}</td><td class="${sign(r.W_O_W)}">${sgn(r.W_O_W)}</td>
       <td>${num(r.future_price)}</td><td class="${sign(r.basis)}">${f(r.basis)}</td>
