@@ -22,7 +22,12 @@ SHEET = Path(__file__).resolve().parent / "sheet_data.json"
 # which is what keeps the declaration from becoming a licence.
 DECLARED_NSE = {
     "Defence":        {"Capital Goods", "Chemicals"},
-    "New Age Stocks": {"Consumer Services", "Financial Services"},
+    # "Services" is here for DELHIVERY (moved into New Age Stocks 2026-10-07).
+    # NSE files it under Services with the ports and airports, which is right
+    # about what it does and wrong about what it trades like; the board groups
+    # it with the loss-making listed-since-2021 platform names it moves with.
+    # A deliberate divergence, declared rather than silently allowed.
+    "New Age Stocks": {"Consumer Services", "Financial Services", "Services"},
 }
 
 DECLARED = {
